@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>StockLens — 한국 주식 기업분석</title>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css?v=9" />
+  <script src="/static/vendor/chart.umd.min.js?v=2"></script>
+</head>
+<body>
+
+<!-- ── 헤더 ─────────────────────────────────────────────────── -->
+<header class="header">
+  <div class="header-inner">
+    <div class="logo">
+      <span class="logo-mark">SL</span>
+      <div>
+        <span class="logo-title">StockLens</span>
+        <span class="logo-sub">한국 주식 기업분석</span>
+      </div>
+    </div>
+
+    <div class="search-wrap">
+      <div class="search-box">
+        <svg class="search-icon" viewBox="0 0 20 20" fill="none">
+          <circle cx="8.5" cy="8.5" r="5.5" stroke="currentColor" stroke-width="1.6"/>
+          <path d="M13 13l3.5 3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+        </svg>
+        <input id="searchInput" type="text" placeholder="기업명 또는 종목코드 입력  (예: 삼성전자, 005930)" autocomplete="off" />
+      </div>
+      <div class="search-dropdown" id="searchDropdown"></div>
+    </div>
+  </div>
+</header>
+
+<!-- ── 메인 ─────────────────────────────────────────────────── -->
+<main class="main">
+
+  <!-- 빈 상태 -->
+  <div class="empty-state" id="emptyState">
+    <div class="empty-hero">
+      <div class="empty-circle">
+        <svg viewBox="0 0 64 64" fill="none">
+          <path d="M8 48 L20 32 L32 38 L44 20 L56 28" stroke="#2f81f7" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="56" cy="28" r="4" fill="#2f81f7"/>
+        </svg>
+      </div>
+    </div>
+    <h1>한국 주식 기업분석 플랫폼</h1>
+    <p>기업명 또는 종목코드를 검색하면 재무현황, 경쟁사 비교, AI 투자의견을 한눈에 확인할 수 있습니다.</p>
+    <div class="quick-stocks">
+      <span class="quick-label">인기 종목</span>
+      <button class="quick-btn" onclick="loadCompany('005930')">삼성전자 <span>005930</span></button>
+      <button class="quick-btn" onclick="loadCompany('000660')">SK하이닉스 <span>000660</span></button>
+      <button class="quick-btn" onclick="loadCompany('035420')">NAVER <span>035420</span></button>
+      <button class="quick-btn" onclick="loadCompany('035720')">카카오 <span>035720</span></button>
+      <button class="quick-btn" onclick="loadCompany('066570')">LG전자 <span>066570</span></button>
+    </div>
+  </div>
+
+  <!-- 대시보드 -->
+  <div class="dashboard" id="dashboard">
+
+    <!-- 기업 헤더 -->
+    <div class="company-header" id="companyHeader"></div>
+
+    <!-- 탭 네비게이션 -->
+    <div class="tab-nav">
+      <button class="tab-btn active" data-tab="overview"     onclick="switchTab('overview')">종합대시보드</button>
+      <button class="tab-btn"        data-tab="financials"   onclick="switchTab('financials')">재무상세</button>
+      <button class="tab-btn"        data-tab="capex"        onclick="switchTab('capex')">시설투자</button>
+      <button class="tab-btn"        data-tab="rnd"          onclick="switchTab('rnd')">R&amp;D</button>
+      <button class="tab-btn"        data-tab="hr"           onclick="switchTab('hr')">인력분석</button>
+      <button class="tab-btn"        data-tab="exec"         onclick="switchTab('exec')">경영자성과</button>
+      <button class="tab-btn"        data-tab="export"       onclick="switchTab('export')">수출·고객사</button>
+      <button class="tab-btn"        data-tab="sector"       onclick="switchTab('sector')">섹터동향</button>
+      <button class="tab-btn"        data-tab="competitors"  onclick="switchTab('competitors')">경쟁사비교</button>
+      <button class="tab-btn"        data-tab="ai-report"    onclick="switchTab('ai-report')">AI보고서</button>
+    </div>
+
+    <!-- ── 탭: 종합대시보드 ──────────────────────────────────── -->
+    <div id="tab-overview" class="tab-pane">
+      <div id="overviewKPI" class="kpi-row"></div>
+      <div class="grid-2-1">
+        <div class="card">
+          <div class="card-header">
+            주가 추이
+            <span id="chartSourceBadge" class="src-badge" style="display:none"></span>
+            <div class="chart-period-btns">
+              <button class="period-btn active" data-period="3mo" onclick="changePeriod('3mo',this)">3개월</button>
+              <button class="period-btn" data-period="6mo" onclick="changePeriod('6mo',this)">6개월</button>
+              <button class="period-btn" data-period="1y"  onclick="changePeriod('1y',this)">1년</button>
+            </div>
+          </div>
+          <div class="chart-wrap"><canvas id="priceChart"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-header">핵심 투자지표</div>
+          <div id="ratiosGrid" class="ratios-grid"></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header">연간 실적 요약 <span class="card-sub">매출액 / 영업이익 (억원)</span></div>
+        <div class="chart-wrap h250"><canvas id="revenueChart"></canvas></div>
+      </div>
+    </div>
+
+    <!-- ── 탭: 재무상세 ──────────────────────────────────────── -->
+    <div id="tab-financials" class="tab-pane hidden">
+      <div class="sub-tab-nav">
+        <button class="sub-btn active" data-sub="income"   onclick="switchSubTab('income')">손익계산서</button>
+        <button class="sub-btn"        data-sub="balance"  onclick="switchSubTab('balance')">재무상태표</button>
+        <button class="sub-btn"        data-sub="cashflow" onclick="switchSubTab('cashflow')">현금흐름표</button>
+      </div>
+
+      <!-- 손익계산서 -->
+      <div id="subtab-income" class="subtab-pane">
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-header">매출액 / 영업이익 추이 <span class="card-sub">억원</span></div>
+            <div class="chart-wrap"><canvas id="incomeChart"></canvas></div>
+          </div>
+          <div class="card">
+            <div class="card-header">손익계산서 요약</div>
+            <table class="fin-table" id="incomeTable"></table>
+          </div>
+        </div>
+        <div id="sgaBreakdown"></div>
+      </div>
+
+      <!-- 재무상태표 -->
+      <div id="subtab-balance" class="subtab-pane hidden">
+        <div class="card asset-card">
+          <div class="card-header">
+            자산 구조 분석
+            <span class="card-sub">영업자산 vs 비영업자산 — SOTP 밸류에이션 기반</span>
+          </div>
+          <div id="assetBreakdown" class="asset-breakdown"></div>
+        </div>
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-header">자산 구성 비율</div>
+            <div class="chart-wrap h260"><canvas id="assetPieChart"></canvas></div>
+          </div>
+          <div class="card">
+            <div class="card-header">부채 및 자본</div>
+            <table class="fin-table" id="liabilityTable"></table>
+          </div>
+        </div>
+      </div>
+
+      <!-- 현금흐름표 -->
+      <div id="subtab-cashflow" class="subtab-pane hidden">
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-header">현금흐름 추이 <span class="card-sub">억원</span></div>
+            <div class="chart-wrap"><canvas id="cashflowChart"></canvas></div>
+          </div>
+          <div class="card">
+            <div class="card-header">현금흐름표 요약</div>
+            <table class="fin-table" id="cashflowTable"></table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── 탭: 시설투자 ──────────────────────────────────────── -->
+    <div id="tab-capex" class="tab-pane hidden">
+      <div class="card">
+        <div class="card-header">CAPEX · 영업현금흐름 · FCF 추이 <span class="card-sub">억원</span></div>
+        <div class="chart-wrap h280"><canvas id="capexChart"></canvas></div>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-header">시설투자 핵심지표</div>
+          <div id="capexMetrics" class="ratios-grid"></div>
+        </div>
+        <div class="card">
+          <div class="card-header">연도별 상세</div>
+          <table class="fin-table" id="capexTable"></table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── 탭: R&D ───────────────────────────────────────────── -->
+    <div id="tab-rnd" class="tab-pane hidden">
+      <div id="rndContent"></div>
+    </div>
+
+    <!-- ── 탭: 인력분석 ────────────────────────────────────── -->
+    <div id="tab-hr" class="tab-pane hidden">
+      <div id="hrContent"></div>
+    </div>
+
+    <!-- ── 탭: 섹터동향 ────────────────────────────────────── -->
+    <div id="tab-sector" class="tab-pane hidden">
+      <div id="sectorContent"></div>
+    </div>
+
+    <!-- ── 탭: 경쟁사비교 ──────────────────────────────────── -->
+    <div id="tab-competitors" class="tab-pane hidden">
+      <div class="card">
+        <div class="card-header">핵심지표 비교</div>
+        <div id="competitorTable"></div>
+      </div>
+      <div class="card">
+        <div class="card-header">시가총액 비교 <span class="card-sub">조원</span></div>
+        <div class="chart-wrap h260"><canvas id="compMcapChart"></canvas></div>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-header">매출액 비교 <span class="card-sub">억원 (2024)</span></div>
+          <div class="chart-wrap"><canvas id="compRevenueChart"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-header">수익성 비교 <span class="card-sub">ROE / 영업이익률</span></div>
+          <div class="chart-wrap"><canvas id="compProfitChart"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── 탭: 경영자성과 ──────────────────────────────────── -->
+    <div id="tab-exec" class="tab-pane hidden">
+      <div id="execContent"></div>
+    </div>
+
+    <!-- ── 탭: 수출·고객사 ─────────────────────────────────── -->
+    <div id="tab-export" class="tab-pane hidden">
+      <div id="exportContent"></div>
+    </div>
+
+    <!-- ── 탭: AI보고서 ───────────────────────────────────── -->
+    <div id="tab-ai-report" class="tab-pane hidden">
+      <div id="aiReportContent"></div>
+    </div>
+
+  </div><!-- /dashboard -->
+</main>
+
+<script src="/static/main.js?v=21"></script>
+</body>
+</html>
