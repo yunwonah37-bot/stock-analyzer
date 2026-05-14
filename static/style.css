@@ -721,6 +721,43 @@ canvas { display: block; }
 .news-title { font-size: 14px; font-weight: 500; line-height: 1.5; color: var(--text); margin-bottom: 3px; }
 .news-body { font-size: 12px; color: var(--text-muted); line-height: 1.5; }
 
+/* ── 한경 컨센서스 ──────────────────────────────────────────── */
+.con-price-wrap  { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
+.con-price-row   { display: grid; grid-template-columns: 72px 1fr auto; align-items: center; gap: 10px; }
+.con-price-label { font-size: 12px; color: var(--text-muted); }
+.con-price-track { height: 14px; background: var(--border); border-radius: 4px; overflow: hidden; }
+.con-price-fill  { height: 100%; border-radius: 4px; transition: width .6s ease; }
+.con-price-fill.cur { background: linear-gradient(90deg, #0969da, #58a6ff); }
+.con-price-fill.tgt { background: linear-gradient(90deg, #1a7f37, #56d364); }
+.con-price-val   { font-size: 13px; font-weight: 600; white-space: nowrap; min-width: 140px; }
+
+.con-metrics     { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
+.con-metric      { flex: 1; min-width: 90px; background: var(--bg); border: 1px solid var(--border);
+                   border-radius: var(--radius-sm); padding: 10px 12px; }
+.con-metric-label { font-size: 11px; color: var(--text-muted); margin-bottom: 4px; }
+.con-metric-val   { font-size: 16px; font-weight: 700; }
+
+.con-reports      { border-top: 1px solid var(--border); padding-top: 12px; }
+.con-reports-title { font-size: 12px; font-weight: 700; color: var(--text-muted);
+                     text-transform: uppercase; letter-spacing: .4px; margin-bottom: 10px; }
+.con-report-row   { display: grid; grid-template-columns: 80px 80px 90px 1fr;
+                    gap: 8px; align-items: center; padding: 8px 0;
+                    border-bottom: 1px solid var(--border); font-size: 13px; }
+.con-report-row:last-child { border-bottom: none; }
+.con-report-brokerage { font-weight: 600; color: var(--blue); font-size: 12px; }
+.con-report-analyst   { font-size: 12px; color: var(--text-muted); }
+.con-report-date      { font-size: 11px; color: var(--text-faint); }
+.con-report-title     { font-size: 13px; line-height: 1.4; overflow: hidden;
+                        text-overflow: ellipsis; white-space: nowrap; }
+
+.news-source.hk { color: #9a6700; background: var(--yellow-dim); }
+
+@media (max-width: 600px) {
+  .con-report-row { grid-template-columns: 70px 1fr; }
+  .con-report-analyst, .con-report-date { display: none; }
+  .con-report-title { grid-column: 1 / -1; white-space: normal; }
+}
+
 /* ── 뉴스 탭 ────────────────────────────────────────────────── */
 .news-tab-nav {
   display: flex; gap: 4px;

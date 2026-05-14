@@ -2369,18 +2369,102 @@ function renderSector(data) {
     </div>`;
   }
 
-  /* ── 6. 관련 뉴스 (한국 / 해외 탭) ── */
-  const news        = data.news        || [];
+  /* ── 6. 한경 컨센서스 ── */
+  const con = data.consensus || {};
+  if (con.opinion || (con.reports && con.reports.length > 0)) {
+    const opinionColor = {
+      '강력매수': 'var(--red)', '매수': '#0969da',
+      '보유': 'var(--yellow)', '매도': 'var(--text-muted)', '강력매도': 'var(--red)',
+    }[con.opinion] || 'var(--text-muted)';
+    const opinionBg = {
+      '강력매수': 'var(--red-dim)', '매수': 'var(--blue-dim)',
+      '보유': 'var(--yellow-dim)', '매도': 'var(--bg-hover)', '강력매도': 'var(--red-dim)',
+    }[con.opinion] || 'var(--bg-hover)';
+
+    // 목표가 vs 현재가 바
+    let priceBarHtml = '';
+    if (con.cur_price && con.target_price) {
+      const cur = con.cur_price, tgt = con.target_price;
+      const max = Math.max(cur, tgt) * 1.05;
+      const curPct  = (cur / max * 100).toFixed(1);
+      const tgtPct  = (tgt / max * 100).toFixed(1);
+      const upsideStr = con.upside != null
+        ? `<span style="color:${con.upside >= 0 ? 'var(--green)' : 'var(--red)'}; font-weight:700">
+             ${con.upside >= 0 ? '▲' : '▼'} ${Math.abs(con.upside)}%
+           </span>`
+        : '';
+      priceBarHtml = `
+        <div class="con-price-wrap">
+          <div class="con-price-row">
+            <span class="con-price-label">현재가</span>
+            <div class="con-price-track">
+              <div class="con-price-fill cur" style="width:${curPct}%"></div>
+            </div>
+            <span class="con-price-val">${cur.toLocaleString('ko-KR')}원</span>
+          </div>
+          <div class="con-price-row">
+            <span class="con-price-label">목표주가</span>
+            <div class="con-price-track">
+              <div class="con-price-fill tgt" style="width:${tgtPct}%"></div>
+            </div>
+            <span class="con-price-val">${tgt.toLocaleString('ko-KR')}원 ${upsideStr}</span>
+          </div>
+        </div>`;
+    }
+
+    // 지표 그리드
+    const metricItems = [
+      con.opinion     ? { label: '투자의견', val: `<span style="color:${opinionColor};font-weight:700">${con.opinion}</span>` } : null,
+      con.per         ? { label: 'PER',      val: con.per + '배' } : null,
+      con.eps         ? { label: 'EPS',      val: con.eps.toLocaleString('ko-KR') + '원' } : null,
+      con.exp_eps     ? { label: '예상EPS',  val: con.exp_eps.toLocaleString('ko-KR') + '원' } : null,
+    ].filter(Boolean);
+
+    const metricsHtml = metricItems.map(m => `
+      <div class="con-metric">
+        <div class="con-metric-label">${m.label}</div>
+        <div class="con-metric-val">${m.val}</div>
+      </div>`).join('');
+
+    // 최신 리포트 목록
+    const reportRows = (con.reports || []).map(rp => `
+      <div class="con-report-row">
+        <span class="con-report-brokerage">${rp.brokerage}</span>
+        <span class="con-report-analyst">${rp.analyst}</span>
+        <span class="con-report-date">${rp.date}</span>
+        <span class="con-report-title">${rp.title}</span>
+      </div>`).join('');
+
+    html += `
+      <div class="card">
+        <div class="card-header">📊 한경 컨센서스
+          <span class="src-badge realtime" style="display:inline-block;margin-left:8px">한국경제</span>
+        </div>
+        ${priceBarHtml}
+        ${metricsHtml ? `<div class="con-metrics">${metricsHtml}</div>` : ''}
+        ${reportRows ? `
+          <div class="con-reports">
+            <div class="con-reports-title">최근 리포트</div>
+            ${reportRows}
+          </div>` : ''}
+      </div>`;
+  }
+
+  /* ── 7. 관련 뉴스 (한국 / 해외 / 한경 탭) ── */
+  const news        = data.news         || [];
   const newsForeign = data.news_foreign || [];
+  const newsHk      = data.news_hankyung || [];
   const hasKr = news.length > 0;
   const hasEn = newsForeign.length > 0;
+  const hasHk = newsHk.length > 0;
 
   function newsItemHtml(n, lang) {
-    const flag = lang === 'en' ? '🌐 ' : '';
+    const cls = lang === 'en' ? ' en' : lang === 'hk' ? ' hk' : '';
+    const flag = lang === 'en' ? '🌐 ' : lang === 'hk' ? '📰 ' : '';
     return `
       <a class="news-item" href="${n.url}" target="_blank" rel="noopener">
         <div class="news-meta">
-          <span class="news-source${lang === 'en' ? ' en' : ''}">${flag}${n.source}</span>
+          <span class="news-source${cls}">${flag}${n.source}</span>
           <span class="news-dt">${n.dt}</span>
         </div>
         <div class="news-title">${n.title}</div>
@@ -2388,25 +2472,31 @@ function renderSector(data) {
       </a>`;
   }
 
-  if (hasKr || hasEn) {
+  if (hasKr || hasEn || hasHk) {
+    // 첫 번째 활성 탭 결정
+    const firstLang = hasKr ? 'kr' : hasHk ? 'hk' : 'en';
     const tabId = `newsTab_${data.code}`;
     html += `<div class="card">
       <div class="card-header">📰 관련 뉴스</div>
       <div class="news-tab-nav" id="${tabId}">
-        <button class="news-tab-btn${hasKr ? ' active' : ''}" data-lang="kr"
+        ${hasKr ? `<button class="news-tab-btn${firstLang==='kr'?' active':''}" data-lang="kr"
           onclick="switchNewsTab('${tabId}','kr')">
-          🇰🇷 한국 뉴스 <span class="news-tab-cnt">${news.length}</span>
-        </button>
-        <button class="news-tab-btn${!hasKr && hasEn ? ' active' : ''}" data-lang="en"
+          🇰🇷 한국 <span class="news-tab-cnt">${news.length}</span></button>` : ''}
+        ${hasHk ? `<button class="news-tab-btn${firstLang==='hk'?' active':''}" data-lang="hk"
+          onclick="switchNewsTab('${tabId}','hk')">
+          📰 한경 <span class="news-tab-cnt">${newsHk.length}</span></button>` : ''}
+        ${hasEn ? `<button class="news-tab-btn${firstLang==='en'?' active':''}" data-lang="en"
           onclick="switchNewsTab('${tabId}','en')">
-          🌐 해외 뉴스 <span class="news-tab-cnt">${newsForeign.length}</span>
-        </button>
+          🌐 해외 <span class="news-tab-cnt">${newsForeign.length}</span></button>` : ''}
       </div>
-      <div class="news-pane" data-lang="kr" style="${hasKr ? '' : 'display:none'}">
-        <div class="news-list">${news.map(n => newsItemHtml(n, 'kr')).join('')}</div>
+      <div class="news-pane" data-lang="kr" style="${firstLang==='kr'?'':'display:none'}">
+        <div class="news-list">${news.map(n => newsItemHtml(n,'kr')).join('')}</div>
       </div>
-      <div class="news-pane" data-lang="en" style="${!hasKr && hasEn ? '' : 'display:none'}">
-        <div class="news-list">${newsForeign.map(n => newsItemHtml(n, 'en')).join('')}</div>
+      <div class="news-pane" data-lang="hk" style="${firstLang==='hk'?'':'display:none'}">
+        <div class="news-list">${newsHk.map(n => newsItemHtml(n,'hk')).join('')}</div>
+      </div>
+      <div class="news-pane" data-lang="en" style="${firstLang==='en'?'':'display:none'}">
+        <div class="news-list">${newsForeign.map(n => newsItemHtml(n,'en')).join('')}</div>
       </div>
     </div>`;
   }

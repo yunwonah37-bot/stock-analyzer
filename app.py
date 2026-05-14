@@ -2460,6 +2460,167 @@ SECTOR_THEMES = {
 }
 
 # ── 종목 뉴스 fetch ─────────────────────────────────────────
+_HK_HDR = {
+    "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                   "AppleWebKit/537.36 (KHTML, like Gecko) "
+                   "Chrome/124.0.0.0 Safari/537.36"),
+    "Accept-Language": "ko-KR,ko;q=0.9",
+    "Referer": "https://markets.hankyung.com/",
+}
+
+
+def _fetch_hankyung_consensus(code: str) -> dict:
+    """한경 컨센서스 페이지 스크래핑: 요약 + 최신 리포트."""
+    from bs4 import BeautifulSoup
+    import re as _re
+
+    try:
+        url = f"https://markets.hankyung.com/stock/{code}/consensus"
+        r = requests.get(url, headers=_HK_HDR, timeout=12)
+        if r.status_code != 200:
+            return {}
+        soup = BeautifulSoup(r.content, "lxml")
+
+        # ── 요약 테이블 파싱 (table-list) ──────────────────────
+        tbl = soup.find("table", class_="table-list")
+        opinion = cur_price = target_price = per = eps = exp_eps = None
+        if tbl:
+            rows = tbl.find_all("tr")
+            for row in rows:
+                th = (row.find("th") or row.find("td"))
+                tds = row.find_all("td")
+                label = th.get_text(" ", strip=True) if th else ""
+                val   = tds[-1].get_text(" ", strip=True) if tds else ""
+
+                # 투자의견
+                opinion_tag = tbl.find(string=_re.compile(r'^(매수|보유|매도|강력매수|강력매도)$'))
+                if opinion_tag and not opinion:
+                    opinion = opinion_tag.strip()
+
+        # table-list 텍스트에서 직접 추출
+        if tbl:
+            txt = tbl.get_text("\n", strip=True)
+            if not opinion:
+                m = _re.search(r'(강력매수|매수|보유|매도|강력매도)', txt)
+                opinion = m.group(1) if m else None
+
+            # 종가 / 목표가
+            lines = [l.strip() for l in txt.split("\n") if l.strip()]
+            for i, line in enumerate(lines):
+                if "종가" in line and i + 1 < len(lines):
+                    m = _re.search(r'([\d,]+)원', "\n".join(lines[i:i+3]))
+                    if m: cur_price = int(m.group(1).replace(",", ""))
+                if "목표가" in line and i + 1 < len(lines):
+                    m = _re.search(r'([\d,]+)원', "\n".join(lines[i:i+3]))
+                    if m: target_price = int(m.group(1).replace(",", ""))
+                if "PER" in line and i + 1 < len(lines):
+                    m = _re.search(r'([\d.]+)', lines[i+1])
+                    if m: per = float(m.group(1))
+                if line == "EPS" and i + 2 < len(lines):
+                    m = _re.search(r'([\d,.]+)', lines[i+2])
+                    if m: eps = float(m.group(1).replace(",", ""))
+                if "예상" in line and "EPS" in line and i + 1 < len(lines):
+                    m = _re.search(r'([\d,.]+)', lines[i+1])
+                    if m: exp_eps = float(m.group(1).replace(",", ""))
+
+        # ── NUXT 페이로드에서 추가 목표주가 데이터 ──────────────
+        nuxt_targets = []   # [(brokerage, analyst, target_price, date)]
+        for s in soup.find_all("script"):
+            t = s.get_text()
+            if "__NUXT__" not in t:
+                continue
+            # 패턴: "증권코드","증권사명",target,"날짜",cur,"매수/보유/매도"
+            # 또는 individual report target patterns
+            # 목표주가 범위 (최솟값, 평균, 최댓값) 추출
+            m_range = _re.search(
+                r'(\d{4,6}),(\d{4,6}),"20\d{6}","20\d{2}-\d{2}-\d{2}",',
+                t)
+            if m_range:
+                lo, hi = int(m_range.group(1)), int(m_range.group(2))
+                # 값이 합리적인 주가 범위(5만~200만)이면 사용
+                if 50_000 < lo < 2_000_000 and 50_000 < hi < 2_000_000:
+                    if not target_price or (lo > target_price and hi > target_price):
+                        # NUXT의 lo/hi가 더 신뢰성 있을 때만 override
+                        pass  # target_price 유지 (table-list 우선)
+            break
+
+        # ── 최신 리포트 파싱 (swiper-slide) ─────────────────────
+        reports = []
+        slides = soup.find_all("div", class_="swiper-slide")
+        for slide in slides:
+            item = slide.find("div", class_="item")
+            if not item:
+                continue
+            by_div = item.find("div", class_="report-by")
+            if not by_div:
+                continue
+            by_text = by_div.get_text("|", strip=True)   # "애널리스트|증권사|날짜"
+            parts   = [p.strip() for p in by_text.split("|") if p.strip()]
+            # 제목: item 전체에서 by_div 텍스트 빼고 남은 것
+            full_txt = item.get_text(" ", strip=True)
+            title = full_txt.replace(by_text.replace("|", " "), "").strip()
+            # 앞부분 회사명 제거 (예: "삼성전자(005930) ")
+            title = _re.sub(r'^[가-힣A-Za-z\d\s\(\)]+\)\s*', '', title).strip() or title
+
+            analyst   = parts[0] if len(parts) > 0 else ""
+            brokerage = parts[1] if len(parts) > 1 else ""
+            date      = parts[2] if len(parts) > 2 else ""
+
+            reports.append({
+                "title":     title,
+                "analyst":   analyst,
+                "brokerage": brokerage,
+                "date":      date,
+            })
+
+        # 상승여력 계산
+        upside = None
+        if cur_price and target_price and cur_price > 0:
+            upside = round((target_price - cur_price) / cur_price * 100, 1)
+
+        return {
+            "opinion":      opinion,
+            "cur_price":    cur_price,
+            "target_price": target_price,
+            "per":          per,
+            "eps":          eps,
+            "exp_eps":      exp_eps,
+            "upside":       upside,
+            "reports":      reports,
+            "_source":      "hankyung",
+        }
+    except Exception as e:
+        app.logger.warning(f"한경 컨센서스 스크래핑 실패 {code}: {e}")
+        return {}
+
+
+def _fetch_hankyung_news(max_items: int = 8) -> list:
+    """한경 증권 RSS 뉴스."""
+    import xml.etree.ElementTree as _ET
+    from email.utils import parsedate_to_datetime as _pdt
+    try:
+        r = requests.get("https://www.hankyung.com/feed/finance",
+                         headers=_HK_HDR, timeout=8)
+        if r.status_code != 200:
+            return []
+        root = _ET.fromstring(r.content)
+        result = []
+        for it in root.findall(".//item")[:max_items]:
+            title = (it.findtext("title") or "").strip()
+            link  = (it.findtext("link")  or "").strip()
+            pub   = (it.findtext("pubDate") or "").strip()
+            try:
+                dt_str = _pdt(pub).strftime("%Y.%m.%d %H:%M")
+            except Exception:
+                dt_str = pub[:16]
+            if title:
+                result.append({"title": title, "source": "한국경제",
+                               "dt": dt_str, "url": link})
+        return result
+    except Exception:
+        return []
+
+
 def _fetch_rss(url: str, max_items: int = 6, source_override: str = "") -> list:
     """RSS 피드 URL을 받아 뉴스 아이템 목록 반환."""
     import xml.etree.ElementTree as ET
@@ -2698,12 +2859,16 @@ def get_sector_trend(code):
                 "years": yrs, "revenue": rev, "op_profit": opl,
             }
 
-    # ── 9. 뉴스 (한국 + 해외 병렬 수집) ────────────────────────
-    with ThreadPoolExecutor(max_workers=2) as _ex:
-        _kr_fut  = _ex.submit(_fetch_stock_news, code, 8)
-        _en_fut  = _ex.submit(_fetch_foreign_news, name, code, 8)
-    news         = _kr_fut.result()
-    news_foreign = _en_fut.result()
+    # ── 9. 뉴스 + 한경 컨센서스 (병렬 수집) ─────────────────────
+    with ThreadPoolExecutor(max_workers=4) as _ex:
+        _kr_fut   = _ex.submit(_fetch_stock_news,      code, 8)
+        _en_fut   = _ex.submit(_fetch_foreign_news,    name, code, 8)
+        _con_fut  = _ex.submit(_fetch_hankyung_consensus, code)
+        _hkn_fut  = _ex.submit(_fetch_hankyung_news,   8)
+    news          = _kr_fut.result()
+    news_foreign  = _en_fut.result()
+    consensus     = _con_fut.result()
+    news_hankyung = _hkn_fut.result()
 
     result = {
         "code":         code,
@@ -2723,7 +2888,9 @@ def get_sector_trend(code):
         "main_fin":     main_fin,
         "news":         news,
         "news_foreign": news_foreign,
-        "_source":      "dart+naver+rss",
+        "news_hankyung": news_hankyung,
+        "consensus":    consensus,
+        "_source":      "dart+naver+rss+hankyung",
     }
     _sector_cache[code] = {"data": result, "ts": now}
     return jsonify(result)
