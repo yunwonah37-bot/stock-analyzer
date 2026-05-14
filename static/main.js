@@ -337,10 +337,12 @@ function renderOverview(data) {
       ? '<span class="src-badge dart"    style="font-size:9px;padding:1px 5px">DART</span>'
       : '<span class="src-badge dummy"   style="font-size:9px;padding:1px 5px">더미</span>';
 
+  const psrColor = r.psr == null ? '' : r.psr < 1 ? 'color:var(--green)' : r.psr > 3 ? 'color:var(--red)' : '';
+
   const ratioItems = [
     { label: 'PER',      value: fmtRatio(r.per),   note: '주가수익비율' },
     { label: 'PBR',      value: fmtRatio(r.pbr),   note: '주가순자산비율' },
-    { label: 'PSR',      value: r.psr != null ? r.psr.toFixed(2) + 'x' : '-', note: '주가매출비율' },
+    { label: 'PSR',      value: r.psr != null ? r.psr.toFixed(2) + 'x' : '-', note: '주가매출비율', style: psrColor },
     { label: 'ROE',      value: r.roe           != null ? r.roe.toFixed(1) + '%'           : '-', note: '자기자본이익률' },
     { label: 'EPS',      value: r.eps           != null ? fmtPrice(r.eps)                  : '-', note: '주당순이익' },
     { label: 'BPS',      value: r.bps           != null ? fmtPrice(r.bps)                  : '-', note: '주당순자산' },
@@ -354,7 +356,7 @@ function renderOverview(data) {
     ratioItems.map(item => `
       <div class="ratio-item">
         <div class="ratio-label">${item.label}</div>
-        <div class="ratio-value">${item.value}</div>
+        <div class="ratio-value" style="${item.style || ''}">${item.value}</div>
         <div class="ratio-note">${item.note}</div>
       </div>`).join('');
 
