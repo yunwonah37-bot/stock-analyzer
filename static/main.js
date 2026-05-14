@@ -340,6 +340,7 @@ function renderOverview(data) {
   const ratioItems = [
     { label: 'PER',      value: fmtRatio(r.per),   note: '주가수익비율' },
     { label: 'PBR',      value: fmtRatio(r.pbr),   note: '주가순자산비율' },
+    { label: 'PSR',      value: r.psr != null ? r.psr.toFixed(2) + 'x' : '-', note: '주가매출비율' },
     { label: 'ROE',      value: r.roe           != null ? r.roe.toFixed(1) + '%'           : '-', note: '자기자본이익률' },
     { label: 'EPS',      value: r.eps           != null ? fmtPrice(r.eps)                  : '-', note: '주당순이익' },
     { label: 'BPS',      value: r.bps           != null ? fmtPrice(r.bps)                  : '-', note: '주당순자산' },
@@ -395,6 +396,118 @@ function renderOverview(data) {
       },
     }
   );
+
+  // PSR 분석 카드
+  renderPsrCard(r);
+}
+
+function renderPsrCard(r) {
+  const card = document.getElementById('psrCard');
+  if (!card) return;
+
+  const psr       = r.psr;
+  const sectorPsr = r.sector_psr;
+  const history   = r.psr_history || [];
+  const years     = r.psr_years   || [];
+
+  if (psr == null) { card.innerHTML = ''; return; }
+
+  let chipCls, chipTxt;
+  if      (psr < 1) { chipCls = 'chip-green';  chipTxt = '저평가'; }
+  else if (psr <= 3){ chipCls = 'chip-yellow'; chipTxt = '적정';   }
+  else              { chipCls = 'chip-red';    chipTxt = '고평가'; }
+
+  const maxV  = Math.max(psr, sectorPsr || 0, 1);
+  const psrW  = Math.min((psr / maxV) * 100, 100).toFixed(1);
+  const secW  = sectorPsr ? Math.min((sectorPsr / maxV) * 100, 100).toFixed(1) : 0;
+
+  const secRow = sectorPsr != null ? `
+    <div class="psr-bar-row">
+      <span class="psr-bar-label">업종 평균</span>
+      <div class="psr-bar-track"><div class="psr-bar-fill psr-sec" style="width:${secW}%"></div></div>
+      <span class="psr-bar-val">${sectorPsr.toFixed(1)}x</span>
+    </div>` : '';
+
+  const premium = (sectorPsr && sectorPsr > 0)
+    ? ((psr - sectorPsr) / sectorPsr * 100).toFixed(1)
+    : null;
+  const premiumTxt = premium != null
+    ? `<span class="psr-premium ${parseFloat(premium) > 0 ? 'over' : 'under'}">${parseFloat(premium) > 0 ? '+' : ''}${premium}% 업종 대비</span>`
+    : '';
+
+  card.innerHTML = `
+    <div class="card">
+      <div class="card-header">
+        PSR (주가매출비율)
+        <span class="psr-chip ${chipCls}">${chipTxt}</span>
+        <span class="card-sub">시가총액 ÷ 연간 매출액</span>
+      </div>
+      <div class="psr-body">
+        <div class="psr-left">
+          <div class="psr-main-wrap">
+            <div class="psr-main-val">${psr.toFixed(2)}<span class="psr-unit">x</span></div>
+            ${premiumTxt}
+          </div>
+          <div class="psr-bars">
+            <div class="psr-bar-row">
+              <span class="psr-bar-label">현재 PSR</span>
+              <div class="psr-bar-track"><div class="psr-bar-fill psr-cur" style="width:${psrW}%"></div></div>
+              <span class="psr-bar-val">${psr.toFixed(2)}x</span>
+            </div>
+            ${secRow}
+          </div>
+          <div class="psr-legend">
+            <span class="psr-legend-item psr-lg-green">1x 이하 저평가</span>
+            <span class="psr-legend-item psr-lg-yellow">1~3x 적정</span>
+            <span class="psr-legend-item psr-lg-red">3x 이상 고평가</span>
+          </div>
+        </div>
+        <div class="psr-right">
+          <div class="psr-chart-title">PSR 추이 <span style="font-size:11px;color:var(--text-faint)">(현재 시총 기준)</span></div>
+          <div class="chart-wrap h180"><canvas id="psrTrendChart"></canvas></div>
+        </div>
+      </div>
+    </div>`;
+
+  if (history.length > 0) {
+    destroyChart('psrTrend');
+    charts.psrTrend = new Chart(
+      document.getElementById('psrTrendChart').getContext('2d'),
+      {
+        type: 'bar',
+        data: {
+          labels: years,
+          datasets: [{
+            label: 'PSR',
+            data: history,
+            backgroundColor: history.map(v =>
+              v == null ? 'transparent' : v < 1 ? '#1a7f3730' : v <= 3 ? '#9a670030' : '#cf222e30'
+            ),
+            borderColor: history.map(v =>
+              v == null ? 'transparent' : v < 1 ? '#1a7f37' : v <= 3 ? '#9a6700' : '#cf222e'
+            ),
+            borderWidth: 1.5, borderRadius: 4,
+          }],
+        },
+        options: {
+          ...baseOptions(),
+          scales: {
+            x: { grid: { color: '#e0e4ea' } },
+            y: {
+              grid: { color: '#e0e4ea' },
+              ticks: { callback: v => v.toFixed(1) + 'x' },
+            },
+          },
+          plugins: {
+            tooltip: { callbacks: {
+              label: ctx => `PSR: ${ctx.parsed.y != null ? ctx.parsed.y.toFixed(2) + 'x' : '-'}`
+            }},
+            legend: { display: false },
+          },
+        },
+      }
+    );
+  }
 }
 
 /* ── 재무상세 ───────────────────────────────────────────────── */

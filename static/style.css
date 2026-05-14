@@ -809,6 +809,41 @@ canvas { display: block; }
   .sga-amt  { font-size: 12px; }
 }
 
+/* ── PSR 카드 ────────────────────────────────────────────────── */
+.psr-body       { display: flex; gap: 24px; align-items: flex-start; }
+.psr-left       { flex: 0 0 340px; }
+.psr-right      { flex: 1; min-width: 0; }
+
+.psr-main-wrap  { display: flex; align-items: baseline; gap: 10px; margin-bottom: 16px; }
+.psr-main-val   { font-size: 36px; font-weight: 700; color: var(--text); line-height: 1; }
+.psr-unit       { font-size: 18px; font-weight: 400; color: var(--text-muted); }
+
+.psr-chip       { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; margin-left: 8px; }
+.chip-green     { background: var(--green-dim); color: var(--green); }
+.chip-yellow    { background: var(--yellow-dim); color: var(--yellow); }
+.chip-red       { background: var(--red-dim);   color: var(--red); }
+
+.psr-premium    { font-size: 12px; font-weight: 600; padding: 2px 7px; border-radius: 8px; }
+.psr-premium.over  { background: var(--red-dim);   color: var(--red); }
+.psr-premium.under { background: var(--green-dim); color: var(--green); }
+
+.psr-bars       { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
+.psr-bar-row    { display: flex; align-items: center; gap: 8px; }
+.psr-bar-label  { font-size: 12px; color: var(--text-muted); width: 60px; flex-shrink: 0; }
+.psr-bar-track  { flex: 1; height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; }
+.psr-bar-fill   { height: 100%; border-radius: 4px; transition: width 0.5s ease; }
+.psr-bar-fill.psr-cur { background: var(--blue); }
+.psr-bar-fill.psr-sec { background: var(--text-muted); }
+.psr-bar-val    { font-size: 12px; font-weight: 600; color: var(--text); width: 38px; text-align: right; flex-shrink: 0; }
+
+.psr-legend     { display: flex; gap: 8px; flex-wrap: wrap; }
+.psr-legend-item { font-size: 11px; padding: 2px 8px; border-radius: 8px; }
+.psr-lg-green   { background: var(--green-dim); color: var(--green); }
+.psr-lg-yellow  { background: var(--yellow-dim); color: var(--yellow); }
+.psr-lg-red     { background: var(--red-dim);   color: var(--red); }
+
+.psr-chart-title { font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 6px; }
+
 /* ── 유틸 ──────────────────────────────────────────────────── */
 .up    { color: var(--red); }
 .down  { color: var(--blue); }
@@ -962,4 +997,9 @@ canvas { display: block; }
   .empty-state p  { font-size: 13px; }
   .quick-btn      { padding: 5px 10px; font-size: 12px; }
   .quick-btn span { font-size: 10px; }
+
+  /* PSR */
+  .psr-body        { flex-direction: column; gap: 16px; }
+  .psr-left, .psr-right { width: 100%; }
+  .psr-main-val    { font-size: 28px; }
 }

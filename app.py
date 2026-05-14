@@ -1474,6 +1474,26 @@ def get_stock(code):
 
     employees = _fetch_dart_employees(code) if DART_KEY else None
 
+    # PSR 계산 (시가총액 ÷ 최근 연간 매출액, 단위 동일 억원)
+    mc       = info.get("market_cap") or 0
+    rev_list = fin["income_statement"]["revenue"]
+    rev_years= fin["income_statement"]["years"]
+    sector   = info.get("sector") or COMPANIES.get(code, {}).get("sector", "")
+
+    psr = round(mc / rev_list[-1], 2) if mc and rev_list and rev_list[-1] else None
+    psr_history = [round(mc / r, 2) if mc and r else None for r in rev_list]
+
+    sector_psr = None
+    for k, v in SECTOR_PSR_AVG.items():
+        if k in sector:
+            sector_psr = v
+            break
+
+    ratios["psr"]         = psr
+    ratios["psr_history"] = psr_history
+    ratios["psr_years"]   = rev_years
+    ratios["sector_psr"]  = sector_psr
+
     return jsonify({
         "info": {**info, "change": change, "change_pct": change_pct,
                  "employees": employees,
@@ -1482,8 +1502,8 @@ def get_stock(code):
         "price_history": {"dates": dates, "prices": prices},
         "ratios":         ratios,
         "income_summary": {
-            "years":            fin["income_statement"]["years"],
-            "revenue":          fin["income_statement"]["revenue"],
+            "years":            rev_years,
+            "revenue":          rev_list,
             "operating_profit": fin["income_statement"]["operating_profit"],
         },
     })
@@ -2458,6 +2478,33 @@ SECTOR_THEMES = {
         ],
     },
 }
+
+# ── 업종별 평균 PSR (Price-to-Sales Ratio) ──────────────────
+SECTOR_PSR_AVG = {
+    "반도체/전자":       1.2,
+    "반도체":            1.5,
+    "인터넷/IT서비스":   3.5,
+    "전기전자":          0.4,
+    "자동차":            0.3,
+    "자동차부품":        0.4,
+    "바이오":            8.0,
+    "헬스케어":          5.0,
+    "금융":              0.5,
+    "은행":              0.4,
+    "보험":              0.4,
+    "유통":              0.2,
+    "에너지":            0.4,
+    "화학":              0.4,
+    "통신":              0.6,
+    "철강":              0.3,
+    "로봇":              5.0,
+    "항공":              0.5,
+    "게임":              3.0,
+    "소프트웨어":        4.0,
+    "방산":              1.8,
+    "조선":              0.5,
+}
+
 
 # ── 종목 뉴스 fetch ─────────────────────────────────────────
 _HK_HDR = {
