@@ -17,9 +17,15 @@ function fmtNum(n) {
   if (abs >= 10000)     return (n / 10000).toFixed(0) + '억';
   return n.toLocaleString('ko-KR');
 }
-function fmtOk(n) {                              // 억원 단위 입력 → 십억원 표시
+function fmtOk(n) {                              // 억원 단위 입력 → 십억원 (소수 1자리)
   if (n == null || isNaN(n)) return '-';
-  return Math.round(Math.abs(n) / 10).toLocaleString('ko-KR') + '십억원';
+  return (n / 10).toLocaleString('ko-KR', {minimumFractionDigits:1, maximumFractionDigits:1}) + '십억원';
+}
+function fmtMcap(n) {                            // 억원 단위 시가총액 → 조원 표시
+  if (!n) return '-';
+  const jo = n / 10000;
+  if (jo >= 1) return jo.toLocaleString('ko-KR', {minimumFractionDigits:1, maximumFractionDigits:1}) + '조원';
+  return (n / 10).toLocaleString('ko-KR', {minimumFractionDigits:1, maximumFractionDigits:1}) + '십억원';
 }
 function fmtPrice(n) {
   return n == null ? '-' : n.toLocaleString('ko-KR') + '원';
@@ -220,7 +226,7 @@ function renderHeader(info) {
       </div>
     </div>
     <div class="ch-meta">
-      <span class="ch-meta-item"><span class="label">시가총액</span>${fmtOk(info.market_cap)}</span>
+      <span class="ch-meta-item"><span class="label">시가총액</span>${fmtMcap(info.market_cap)}</span>
       <span class="ch-meta-item"><span class="label">52주 최고</span>${fmtPrice(info.w52_high)}</span>
       <span class="ch-meta-item"><span class="label">52주 최저</span>${fmtPrice(info.w52_low)}</span>
       <span class="ch-meta-item"><span class="label">상장주식수</span>${Number(info.shares).toLocaleString('ko-KR')}주</span>
@@ -314,7 +320,7 @@ function renderOverview(data) {
   }
 
   const kpiItems = [
-    { label: '시가총액',         value: fmtOk(info.market_cap),                        note: info.market || '' },
+    { label: '시가총액',         value: fmtMcap(info.market_cap),                        note: info.market || '' },
     { label: '영업이익률',       value: opMarginVal != null ? opMarginVal + '%' : '-',  note: is.years[lastIdx] + '년 기준' },
     { label: '영업이익 증가율',  value: opYoyHtml || '-',                               note: `${is.years[lastIdx - 1] || ''}→${is.years[lastIdx]} YoY` },
     { label: 'PER',              value: fmtRatio(r.per),                               note: '주가수익비율' },
@@ -370,14 +376,14 @@ function renderOverview(data) {
         labels: data.income_summary.years,
         datasets: [
           {
-            label: '매출액',
+            label: '매출액 (십억원)',
             data: data.income_summary.revenue,
             backgroundColor: '#2f81f740',
             borderColor: '#2f81f7',
             borderWidth: 1.5, borderRadius: 4,
           },
           {
-            label: '영업이익',
+            label: '영업이익 (십억원)',
             data: data.income_summary.operating_profit,
             backgroundColor: '#3fb95040',
             borderColor: '#3fb950',
@@ -529,9 +535,9 @@ function renderIncomeStatement(fin) {
       data: {
         labels: fin.income_statement.years,
         datasets: [
-          { label: '매출액',   data: fin.income_statement.revenue,          backgroundColor: '#2f81f740', borderColor: '#2f81f7', borderWidth: 1.5, borderRadius: 4 },
-          { label: '영업이익', data: fin.income_statement.operating_profit,  backgroundColor: '#3fb95040', borderColor: '#3fb950', borderWidth: 1.5, borderRadius: 4 },
-          { label: '순이익',   data: fin.income_statement.net_income,        backgroundColor: '#d2992240', borderColor: '#d29922', borderWidth: 1.5, borderRadius: 4 },
+          { label: '매출액 (십억원)',   data: fin.income_statement.revenue,          backgroundColor: '#2f81f740', borderColor: '#2f81f7', borderWidth: 1.5, borderRadius: 4 },
+          { label: '영업이익 (십억원)', data: fin.income_statement.operating_profit,  backgroundColor: '#3fb95040', borderColor: '#3fb950', borderWidth: 1.5, borderRadius: 4 },
+          { label: '순이익 (십억원)',   data: fin.income_statement.net_income,        backgroundColor: '#d2992240', borderColor: '#d29922', borderWidth: 1.5, borderRadius: 4 },
         ],
       },
       options: {
@@ -856,9 +862,9 @@ function renderCashFlow(fin) {
       data: {
         labels: cf.years,
         datasets: [
-          { label: '영업활동', data: cf.operating_cf, backgroundColor: '#3fb95050', borderColor: '#3fb950', borderWidth: 1.5, borderRadius: 4 },
-          { label: '투자활동', data: cf.investing_cf,  backgroundColor: '#f8514950', borderColor: '#f85149', borderWidth: 1.5, borderRadius: 4 },
-          { label: '재무활동', data: cf.financing_cf,  backgroundColor: '#d2992250', borderColor: '#d29922', borderWidth: 1.5, borderRadius: 4 },
+          { label: '영업활동 (십억원)', data: cf.operating_cf, backgroundColor: '#3fb95050', borderColor: '#3fb950', borderWidth: 1.5, borderRadius: 4 },
+          { label: '투자활동 (십억원)', data: cf.investing_cf,  backgroundColor: '#f8514950', borderColor: '#f85149', borderWidth: 1.5, borderRadius: 4 },
+          { label: '재무활동 (십억원)', data: cf.financing_cf,  backgroundColor: '#d2992250', borderColor: '#d29922', borderWidth: 1.5, borderRadius: 4 },
         ],
       },
       options: {
@@ -909,19 +915,19 @@ function renderCapex(fin, stock) {
         labels: years,
         datasets: [
           {
-            label: '영업현금흐름(OCF)',
+            label: '영업현금흐름(OCF) (십억원)',
             data: ocf,
             backgroundColor: '#3fb95044', borderColor: '#3fb950',
             borderWidth: 1.5, borderRadius: 4, order: 2,
           },
           {
-            label: 'CAPEX',
+            label: 'CAPEX (십억원)',
             data: capex,
             backgroundColor: '#f0883e44', borderColor: '#f0883e',
             borderWidth: 1.5, borderRadius: 4, order: 2,
           },
           {
-            label: 'FCF',
+            label: 'FCF (십억원)',
             type: 'line',
             data: fcf,
             borderColor: '#2f81f7', backgroundColor: '#2f81f720',
@@ -1140,7 +1146,7 @@ function renderRnd(fin, stock) {
           labels: years,
           datasets: [
             {
-              label: 'R&D 비용',
+              label: 'R&D 비용 (십억원)',
               data: expense,
               backgroundColor: '#a371f744', borderColor: '#a371f7',
               borderWidth: 1.5, borderRadius: 4,
@@ -1380,7 +1386,7 @@ function renderCompetitors(rows) {
     const roe  = r.roe        != null ? r.roe.toFixed(1) + '%' : '-';
     const per  = r.per        != null ? fmtRatio(r.per)        : '-';
     const pbr  = r.pbr        != null ? fmtRatio(r.pbr)        : '-';
-    const mcap = r.market_cap          ? fmtOk(r.market_cap)   : '-';
+    const mcap = r.market_cap          ? fmtMcap(r.market_cap) : '-';
     return `
       <tr class="${r.is_main ? 'main-row' : ''}">
         <td>
@@ -1471,7 +1477,7 @@ function renderCompetitors(rows) {
       data: {
         labels: rows.map(r => r.name),
         datasets: [{
-          label: '매출액 (억원)',
+          label: '매출액 (십억원)',
           data:  rows.map(r => r.revenue),
           backgroundColor: rows.map(r => r.is_main ? '#2f81f7' : '#2f81f740'),
           borderColor: '#2f81f7', borderWidth: 1.5, borderRadius: 4,
@@ -1540,11 +1546,8 @@ function renderCompetitors(rows) {
 /* ── AI 보고서 ─────────────────────────────────────────────── */
 function fmtFcf(n) {
   if (n == null) return '-';
-  const abs  = Math.abs(n);
-  const sign = n >= 0 ? '+' : '-';
-  return abs >= 10000
-    ? sign + (abs / 10000).toFixed(1) + '조'
-    : sign + abs.toLocaleString('ko-KR') + '억';
+  const sign = n > 0 ? '+' : '';
+  return sign + (n / 10).toLocaleString('ko-KR', {minimumFractionDigits:1, maximumFractionDigits:1}) + '십억원';
 }
 
 function renderAiReport(ai) {
@@ -1983,7 +1986,7 @@ function renderExec(data) {
   if (yrs.length > 0) {
     html += `<div class="grid-2">
       <div class="card">
-        <div class="card-header">📊 매출·영업이익 추이 <span class="card-sub">억원</span> ${tenureNote}</div>
+        <div class="card-header">📊 매출·영업이익 추이 <span class="card-sub">십억원</span> ${tenureNote}</div>
         <div class="chart-wrap"><canvas id="execRevChart"></canvas></div>
       </div>
       <div class="card">
@@ -2001,8 +2004,8 @@ function renderExec(data) {
   const displayList = regComp.length > 0 ? regComp : comp;
   const displayMax  = regComp.length > 0 ? maxRegComp : maxComp;
   const displaySub  = regComp.length > 0
-    ? '등기임원 전체 · 세전 · 억원'
-    : '5억 이상 공시분 · 세전 · 억원';
+    ? '등기임원 전체 · 세전 · 십억원'
+    : '5억 이상 공시분 · 세전 · 십억원';
 
   if (displayList.length > 0) {
     html += `<div class="card">
@@ -2098,11 +2101,11 @@ function renderExec(data) {
       data: {
         labels: yrs,
         datasets: [
-          { label: '매출액',   data: revL, backgroundColor: revBarColors, borderRadius: 3 },
-          { label: '영업이익', data: opL,  backgroundColor: opBarColors,  borderRadius: 3 },
+          { label: '매출액 (십억원)',   data: revL, backgroundColor: revBarColors, borderRadius: 3 },
+          { label: '영업이익 (십억원)', data: opL,  backgroundColor: opBarColors,  borderRadius: 3 },
         ],
       },
-      options: baseOptions({ scales: { y: { ticks: { callback: v => v >= 10000 ? (v/10000).toFixed(0)+'조' : v+'억' }}}})
+      options: baseOptions({ scales: { y: { ticks: { callback: v => fmtOk(v) }}}})
     });
 
     const roeData = roeL.map(v => v != null ? v : null);
@@ -2181,7 +2184,7 @@ function renderExport(data) {
 
     if (finYears.length > 0) {
       html += `<div class="card">
-        <div class="card-header">📊 매출·영업이익 추이 <span class="card-sub">억원 · DART 재무데이터</span></div>
+        <div class="card-header">📊 매출·영업이익 추이 <span class="card-sub">십억원 · DART 재무데이터</span></div>
         <div class="chart-wrap h240"><canvas id="partialRevChart"></canvas></div>
       </div>`;
     }
@@ -2196,13 +2199,11 @@ function renderExport(data) {
           data: {
             labels: finYears,
             datasets: [
-              { label: '매출액',   data: finRev, backgroundColor: 'rgba(47,129,247,0.55)', borderRadius: 3 },
-              { label: '영업이익', data: finOp,  backgroundColor: 'rgba(63,185,80,0.75)',  borderRadius: 3 },
+              { label: '매출액 (십억원)',   data: finRev, backgroundColor: 'rgba(47,129,247,0.55)', borderRadius: 3 },
+              { label: '영업이익 (십억원)', data: finOp,  backgroundColor: 'rgba(63,185,80,0.75)',  borderRadius: 3 },
             ],
           },
-          options: baseOptions({ scales: { y: { ticks: { callback: v =>
-            v >= 10000 ? (v/10000).toFixed(0)+'조' : v+'억'
-          }}}})
+          options: baseOptions({ scales: { y: { ticks: { callback: v => fmtOk(v) }}}})
         }
       );
     }
@@ -2365,12 +2366,10 @@ function renderSector(data) {
 
   html += `<div class="grid-2">
     <div class="card">
-      <div class="card-header">🏆 업종 내 시총 순위 <span class="card-sub">억원</span></div>
+      <div class="card-header">🏆 업종 내 시총 순위 <span class="card-sub">조원</span></div>
       <div class="sector-rank-list">${top10.map((x, i) => {
         const pct   = maxMcap > 0 ? (x.market_cap / maxMcap * 100).toFixed(1) : 0;
-        const mcapStr = x.market_cap >= 10000
-          ? (x.market_cap / 10000).toFixed(1) + '조'
-          : (x.market_cap || 0).toLocaleString() + '억';
+        const mcapStr = fmtMcap(x.market_cap);
         return `<div class="sector-rank-row${x.is_main ? ' is-main' : ''}">
           <span class="sector-rank-no">${i+1}</span>
           <span class="sector-rank-name">${x.name}${x.is_main ? ' <span class="me-badge">나</span>' : ''}</span>
@@ -2430,9 +2429,7 @@ function renderSector(data) {
         <th>PER</th><th>PBR</th><th>ROE</th><th>등락</th>
       </tr></thead>
       <tbody>${items.map((x, i) => {
-        const mcapStr = !x.market_cap ? '-'
-          : x.market_cap >= 10000 ? (x.market_cap/10000).toFixed(1)+'조'
-          : x.market_cap.toLocaleString()+'억';
+        const mcapStr = fmtMcap(x.market_cap);
         const chg = x.change_pct;
         const chgStr = chg != null
           ? `<span style="color:${chg>=0?'var(--red)':'var(--blue)'}">${chg>=0?'▲':'▼'}${Math.abs(chg).toFixed(2)}%</span>`
@@ -2456,7 +2453,7 @@ function renderSector(data) {
   /* ── 4. 매출·영업이익 추이 (DART 기반) ── */
   if (mainFin.years && mainFin.years.length > 0) {
     html += `<div class="card">
-      <div class="card-header">📈 ${data.name} 실적 추이 <span class="card-sub">억원 · DART 재무데이터</span></div>
+      <div class="card-header">📈 ${data.name} 실적 추이 <span class="card-sub">십억원 · DART 재무데이터</span></div>
       <div class="chart-wrap h240"><canvas id="sectorRevChart"></canvas></div>
     </div>`;
   }
@@ -2627,13 +2624,11 @@ function renderSector(data) {
         data: {
           labels: mainFin.years,
           datasets: [
-            { label: '매출액',   data: mainFin.revenue,   backgroundColor: 'rgba(47,129,247,0.55)', borderRadius: 3 },
-            { label: '영업이익', data: mainFin.op_profit, backgroundColor: 'rgba(63,185,80,0.75)',  borderRadius: 3 },
+            { label: '매출액 (십억원)',   data: mainFin.revenue,   backgroundColor: 'rgba(47,129,247,0.55)', borderRadius: 3 },
+            { label: '영업이익 (십억원)', data: mainFin.op_profit, backgroundColor: 'rgba(63,185,80,0.75)',  borderRadius: 3 },
           ],
         },
-        options: baseOptions({ scales: { y: { ticks: { callback: v =>
-          v >= 10000 ? (v/10000).toFixed(0)+'조' : v+'억'
-        }}}})
+        options: baseOptions({ scales: { y: { ticks: { callback: v => fmtOk(v) }}}})
       }
     );
   }
