@@ -17,9 +17,9 @@ function fmtNum(n) {
   if (abs >= 10000)     return (n / 10000).toFixed(0) + '억';
   return n.toLocaleString('ko-KR');
 }
-function fmtOk(n) {                              // 억원 단위로 이미 들어온 값
+function fmtOk(n) {                              // 억원 단위 입력 → 십억원 표시
   if (n == null || isNaN(n)) return '-';
-  return Math.abs(n).toLocaleString('ko-KR') + '억원';
+  return Math.round(Math.abs(n) / 10).toLocaleString('ko-KR') + '십억원';
 }
 function fmtPrice(n) {
   return n == null ? '-' : n.toLocaleString('ko-KR') + '원';
@@ -577,8 +577,8 @@ function renderIncomeStatement(fin) {
 
   // 판관비 세부 항목 카드
   const srcNote = hasRealSubs
-    ? `DART 공시 세부항목 · ${sgaYear}년 · 억원`
-    : (rndAmt > 0 ? `연구개발비 별도 산출 · ${sgaYear}년 · 억원` : `${sgaYear}년 · 억원`);
+    ? `DART 공시 세부항목 · ${sgaYear}년 · 십억원`
+    : (rndAmt > 0 ? `연구개발비 별도 산출 · ${sgaYear}년 · 십억원` : `${sgaYear}년 · 십억원`);
 
   const subHtml = sga > 0 ? `<div class="card">
     <div class="card-header">📂 판매관리비 세부 항목 <span class="card-sub">${srcNote}</span></div>
@@ -823,7 +823,7 @@ function renderCapex(fin, stock) {
         },
         plugins: {
           tooltip: { callbacks: {
-            label: ctx => `${ctx.dataset.label}: ${fmtOk(ctx.parsed.y)}억원`,
+            label: ctx => `${ctx.dataset.label}: ${fmtOk(ctx.parsed.y)}`,
           }},
         },
       },
@@ -846,12 +846,12 @@ function renderCapex(fin, stock) {
   const isCapexSrc  = cf.capex && cf.capex.some(v => v > 0) ? 'DART' : '추정';
 
   const metrics = [
-    { label: `CAPEX (${years[lastIdx]})`,   value: fmtOk(lastCapex) + '억',  note: isCapexSrc + ' 기준' },
-    { label: 'CAPEX / 매출',                value: capexRatio,                note: '설비투자 강도' },
-    { label: 'CAPEX / OCF',                 value: capexOcfRat,               note: '현금흐름 대비' },
-    { label: `FCF (${years[lastIdx]})`,     value: fmtOk(lastFcf) + '억',    note: lastFcf >= 0 ? '양(+) FCF' : '음(-) FCF' },
-    { label: 'FCF 마진',                    value: fcfMargin,                  note: 'FCF / 매출액' },
-    { label: '연평균 CAPEX',                value: fmtOk(avgCapex) + '억',    note: years[0] + '~' + years[lastIdx] },
+    { label: `CAPEX (${years[lastIdx]})`,   value: fmtOk(lastCapex),  note: isCapexSrc + ' 기준' },
+    { label: 'CAPEX / 매출',                value: capexRatio,        note: '설비투자 강도' },
+    { label: 'CAPEX / OCF',                 value: capexOcfRat,       note: '현금흐름 대비' },
+    { label: `FCF (${years[lastIdx]})`,     value: fmtOk(lastFcf),   note: lastFcf >= 0 ? '양(+) FCF' : '음(-) FCF' },
+    { label: 'FCF 마진',                    value: fcfMargin,          note: 'FCF / 매출액' },
+    { label: '연평균 CAPEX',                value: fmtOk(avgCapex),   note: years[0] + '~' + years[lastIdx] },
   ];
 
   document.getElementById('capexMetrics').innerHTML = metrics.map(m => `
@@ -909,7 +909,7 @@ function renderRnd(fin, stock) {
       }).join('');
       sgaSection = `
         <div class="card" style="margin-top:16px">
-          <div class="card-header">판매비와관리비 추이 <span class="card-sub">R&D 포함 — 억원</span></div>
+          <div class="card-header">판매비와관리비 추이 <span class="card-sub">R&D 포함 — 십억원</span></div>
           <table class="fin-table">
             <thead><tr><th>연도</th><th>SG&amp;A</th><th>SG&amp;A/매출</th></tr></thead>
             <tbody>${sgaRows}</tbody>
@@ -920,9 +920,9 @@ function renderRnd(fin, stock) {
     const devSection = devAsset > 0 ? `
       <div class="rnd-dev-row">
         <span class="rnd-dev-label">개발비 자산 (BS 무형자산)</span>
-        <span class="rnd-dev-val">${fmtOk(devAsset)}억원</span>
+        <span class="rnd-dev-val">${fmtOk(devAsset)}</span>
         <span class="rnd-dev-chg ${devAsset >= devPrev ? '' : 'neg'}">
-          ${devPrev ? (devAsset >= devPrev ? '▲' : '▼') + fmtOk(Math.abs(devAsset - devPrev)) + '억' : '-'}
+          ${devPrev ? (devAsset >= devPrev ? '▲' : '▼') + fmtOk(Math.abs(devAsset - devPrev)) : '-'}
         </span>
       </div>` : '';
 
@@ -959,12 +959,12 @@ function renderRnd(fin, stock) {
   const avg   = Math.round(expense.reduce((a, b) => a + b, 0) / expense.length);
 
   const metrics = [
-    { label: `R&D (${years[li]})`,   value: fmtOk(expense[li]) + '억', note: 'DART 비용처리분' },
+    { label: `R&D (${years[li]})`,   value: fmtOk(expense[li]), note: 'DART 비용처리분' },
     { label: 'R&D 집중도',           value: rndRatio[li].toFixed(2) + '%', note: 'R&D / 매출액' },
-    { label: 'R&D / 영업이익',       value: rndOp,                      note: '이익 대비 투자' },
-    { label: 'YoY 증감',             value: yoy,                        note: '전년 대비' },
-    { label: '연평균 R&D',           value: fmtOk(avg) + '억',          note: years[0] + '~' + years[li] },
-    { label: '개발비 자산',          value: rnd.dev_asset ? fmtOk(rnd.dev_asset) + '억' : '-', note: 'BS 자산화분' },
+    { label: 'R&D / 영업이익',       value: rndOp,              note: '이익 대비 투자' },
+    { label: 'YoY 증감',             value: yoy,                note: '전년 대비' },
+    { label: '연평균 R&D',           value: fmtOk(avg),         note: years[0] + '~' + years[li] },
+    { label: '개발비 자산',          value: rnd.dev_asset ? fmtOk(rnd.dev_asset) : '-', note: 'BS 자산화분' },
   ];
 
   const metricsHtml = metrics.map(m => `
@@ -1000,7 +1000,7 @@ function renderRnd(fin, stock) {
 
   container.innerHTML = `
     <div class="card">
-      <div class="card-header">R&amp;D 비용 추이 <span class="card-sub">억원 / 집중도(%)</span>${acctBadge}</div>
+      <div class="card-header">R&amp;D 비용 추이 <span class="card-sub">십억원 / 집중도(%)</span>${acctBadge}</div>
       <div class="chart-wrap h280"><canvas id="rndChartCanvas"></canvas></div>
     </div>
     <div class="grid-2" style="margin-top:16px">
@@ -1052,7 +1052,7 @@ function renderRnd(fin, stock) {
             tooltip: { callbacks: {
               label: ctx => ctx.dataset.yAxisID === 'y1'
                 ? `R&D 집중도: ${ctx.parsed.y.toFixed(2)}%`
-                : `R&D 비용: ${fmtOk(ctx.parsed.y)}억원`,
+                : `R&D 비용: ${fmtOk(ctx.parsed.y)}`,
             }},
           },
         },
@@ -1325,14 +1325,14 @@ function renderCompetitors(rows) {
               const조 = ctx.parsed.x;
               return 조 >= 1
                 ? `${조.toLocaleString('ko-KR', {maximumFractionDigits:1})}조원`
-                : `${(조 * 10000).toLocaleString('ko-KR')}억원`;
+                : `${(조 * 1000).toLocaleString('ko-KR')}십억원`;
             },
           }},
         },
         scales: {
           x: {
             grid: { color: '#e0e4ea' },
-            ticks: { callback: v => v >= 1 ? v + '조' : (v * 10000) + '억' },
+            ticks: { callback: v => v >= 1 ? v + '조' : (v * 1000) + '십억' },
           },
           y: {
             grid: { color: '#e0e4ea' },
@@ -1619,6 +1619,17 @@ function switchSubTab(sub) {
   });
 }
 
+function switchNewsTab(tabId, lang) {
+  const nav = document.getElementById(tabId);
+  if (!nav) return;
+  nav.querySelectorAll('.news-tab-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.lang === lang);
+  });
+  nav.parentElement.querySelectorAll('.news-pane').forEach(pane => {
+    pane.style.display = pane.dataset.lang === lang ? '' : 'none';
+  });
+}
+
 /* ── 경영자 성과 탭 ─────────────────────────────────────────── */
 function renderExec(data) {
   const execs   = data.executives       || [];
@@ -1676,7 +1687,7 @@ function renderExec(data) {
     }
     const appointDate = parseTenureDate(ceo.tenure);
     const payText     = data.ceo_pay_ok != null
-      ? `<strong>${data.ceo_pay_ok.toFixed(1)}억원</strong> <span style="color:var(--text-muted);font-size:12px">(${year}년 세전)</span>`
+      ? `<strong>${(data.ceo_pay_ok / 10).toFixed(2)}십억원</strong> <span style="color:var(--text-muted);font-size:12px">(${year}년 세전)</span>`
       : '<span style="color:var(--text-muted)">미공시 <span style="font-size:11px">(5억 미만 또는 공시 제외)</span></span>';
     html += `<div class="card exec-profile-card">
       <div class="exec-profile-grid">
@@ -1702,12 +1713,12 @@ function renderExec(data) {
   /* ═══════════════════════════════════════════════════════════
      2. 핵심 지표 행 (KPI 4개)
   ═══════════════════════════════════════════════════════════ */
-  const avgSalOk  = data.avg_salary_won != null ? (data.avg_salary_won / 100_000_000).toFixed(2) : null;
+  const avgSalOk  = data.avg_salary_won != null ? (data.avg_salary_won / 1_000_000_000).toFixed(2) : null;
   const kpis = [
     { label: '등기임원',       value: regExecs.length + '명',               note: year + '년 사업보고서' },
     { label: '사외이사 비율',   value: regExecs.length ? (outside/regExecs.length*100).toFixed(0)+'%' : '-', note: '독립성 지표' },
-    { label: '직원 평균급여',   value: avgSalOk ? avgSalOk + '억원' : '-',   note: '연간 세전' },
-    { label: '1인당 영업이익',  value: m.per_employee_op_ok != null ? m.per_employee_op_ok.toFixed(2)+'억원' : '-', note: '직원 생산성' },
+    { label: '직원 평균급여',   value: avgSalOk ? avgSalOk + '십억원' : '-',   note: '연간 세전' },
+    { label: '1인당 영업이익',  value: m.per_employee_op_ok != null ? (m.per_employee_op_ok / 10).toFixed(3)+'십억원' : '-', note: '직원 생산성' },
   ];
   html += `<div class="kpi-row">${kpis.map(k => `
     <div class="kpi-card">
@@ -1720,8 +1731,8 @@ function renderExec(data) {
      2-B. CEO vs 직원 평균급여 시각화
   ═══════════════════════════════════════════════════════════ */
   if (data.ceo_pay_ok != null && data.avg_salary_won != null) {
-    const ceoPay   = data.ceo_pay_ok;                               // 억원
-    const avgSal   = data.avg_salary_won / 100_000_000;             // 억원
+    const ceoPay   = data.ceo_pay_ok / 10;                          // 십억원
+    const avgSal   = data.avg_salary_won / 1_000_000_000;           // 십억원
     const ratio    = m.ceo_to_avg_salary_x;
     const maxVal   = Math.max(ceoPay, avgSal * 1.05);
     const ceoPct   = (ceoPay / maxVal * 100).toFixed(1);
@@ -1734,12 +1745,12 @@ function renderExec(data) {
         <div class="salary-row">
           <span class="salary-name">CEO (${ceo ? ceo.name : '대표이사'})</span>
           <div class="salary-track"><div class="salary-fill ceo" style="width:${ceoPct}%"></div></div>
-          <span class="salary-val">${ceoPay.toFixed(1)}억원</span>
+          <span class="salary-val">${ceoPay.toFixed(2)}십억원</span>
         </div>
         <div class="salary-row">
           <span class="salary-name">직원 평균급여</span>
           <div class="salary-track"><div class="salary-fill emp" style="width:${avgPct}%"></div></div>
-          <span class="salary-val">${avgSal.toFixed(2)}억원</span>
+          <span class="salary-val">${avgSal.toFixed(3)}십억원</span>
         </div>
         <div class="salary-ratio-row">
           <span style="color:var(--text-muted);font-size:13px">CEO / 직원 평균</span>
@@ -2358,20 +2369,44 @@ function renderSector(data) {
     </div>`;
   }
 
-  /* ── 6. 관련 뉴스 ── */
-  const news = data.news || [];
-  if (news.length > 0) {
+  /* ── 6. 관련 뉴스 (한국 / 해외 탭) ── */
+  const news        = data.news        || [];
+  const newsForeign = data.news_foreign || [];
+  const hasKr = news.length > 0;
+  const hasEn = newsForeign.length > 0;
+
+  function newsItemHtml(n, lang) {
+    const flag = lang === 'en' ? '🌐 ' : '';
+    return `
+      <a class="news-item" href="${n.url}" target="_blank" rel="noopener">
+        <div class="news-meta">
+          <span class="news-source${lang === 'en' ? ' en' : ''}">${flag}${n.source}</span>
+          <span class="news-dt">${n.dt}</span>
+        </div>
+        <div class="news-title">${n.title}</div>
+        ${n.body ? `<div class="news-body">${n.body}…</div>` : ''}
+      </a>`;
+  }
+
+  if (hasKr || hasEn) {
+    const tabId = `newsTab_${data.code}`;
     html += `<div class="card">
-      <div class="card-header">📰 관련 뉴스 <span class="card-sub">Naver Finance</span></div>
-      <div class="news-list">${news.map(n => `
-        <a class="news-item" href="${n.url}" target="_blank" rel="noopener">
-          <div class="news-meta">
-            <span class="news-source">${n.source}</span>
-            <span class="news-dt">${n.dt}</span>
-          </div>
-          <div class="news-title">${n.title}</div>
-          ${n.body ? `<div class="news-body">${n.body}…</div>` : ''}
-        </a>`).join('')}
+      <div class="card-header">📰 관련 뉴스</div>
+      <div class="news-tab-nav" id="${tabId}">
+        <button class="news-tab-btn${hasKr ? ' active' : ''}" data-lang="kr"
+          onclick="switchNewsTab('${tabId}','kr')">
+          🇰🇷 한국 뉴스 <span class="news-tab-cnt">${news.length}</span>
+        </button>
+        <button class="news-tab-btn${!hasKr && hasEn ? ' active' : ''}" data-lang="en"
+          onclick="switchNewsTab('${tabId}','en')">
+          🌐 해외 뉴스 <span class="news-tab-cnt">${newsForeign.length}</span>
+        </button>
+      </div>
+      <div class="news-pane" data-lang="kr" style="${hasKr ? '' : 'display:none'}">
+        <div class="news-list">${news.map(n => newsItemHtml(n, 'kr')).join('')}</div>
+      </div>
+      <div class="news-pane" data-lang="en" style="${!hasKr && hasEn ? '' : 'display:none'}">
+        <div class="news-list">${newsForeign.map(n => newsItemHtml(n, 'en')).join('')}</div>
       </div>
     </div>`;
   }

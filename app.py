@@ -2460,6 +2460,97 @@ SECTOR_THEMES = {
 }
 
 # ── 종목 뉴스 fetch ─────────────────────────────────────────
+def _fetch_rss(url: str, max_items: int = 6, source_override: str = "") -> list:
+    """RSS 피드 URL을 받아 뉴스 아이템 목록 반환."""
+    import xml.etree.ElementTree as ET
+    from email.utils import parsedate_to_datetime
+    _hdr = {"User-Agent": "Mozilla/5.0 (compatible; RSS reader/1.0)"}
+    try:
+        r = requests.get(url, headers=_hdr, timeout=8)
+        if r.status_code != 200:
+            return []
+        root = ET.fromstring(r.content)
+        items = root.findall(".//item")
+        result = []
+        for it in items[:max_items]:
+            title = (it.findtext("title") or "").strip()
+            link  = (it.findtext("link")  or "").strip()
+            pub   = (it.findtext("pubDate") or "").strip()
+            src_el = it.find("source")
+            source = source_override or (src_el.text.strip() if src_el is not None and src_el.text else "")
+            # pubDate 파싱
+            try:
+                dt = parsedate_to_datetime(pub)
+                dt_str = dt.strftime("%Y.%m.%d %H:%M")
+            except Exception:
+                dt_str = pub[:16]
+            if title and link:
+                result.append({"title": title, "source": source, "dt": dt_str, "url": link})
+        return result
+    except Exception:
+        return []
+
+
+def _fetch_foreign_news(company_name: str = "", stock_code: str = "",
+                        max_items: int = 8) -> list:
+    """Bloomberg + Google News RSS로 해외 뉴스 수집."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    # 종목별 검색어 (영문 회사명 또는 코드 기반)
+    _KR_EN = {
+        "005930": "Samsung Electronics", "000660": "SK Hynix",
+        "035420": "Naver Korea", "035720": "Kakao Korea",
+        "066570": "LG Electronics", "005380": "Hyundai Motor",
+        "000270": "Kia Motors", "051910": "LG Chem",
+        "068270": "Celltrion", "006400": "Samsung SDI",
+    }
+    en_name = _KR_EN.get(stock_code, company_name)
+
+    # 일반 마켓 피드 (섹터 공통)
+    market_feeds = [
+        ("Bloomberg",  "https://feeds.bloomberg.com/markets/news.rss", 4),
+        ("Google News","https://news.google.com/rss/search?q=korea+stock+market"
+                       "&hl=en&gl=US&ceid=US:en", 4),
+    ]
+    # 종목별 피드
+    stock_feeds = []
+    if en_name:
+        q = requests.utils.quote(f"{en_name} stock")
+        stock_feeds.append(
+            ("Google News",
+             f"https://news.google.com/rss/search?q={q}&hl=en&gl=US&ceid=US:en",
+             6)
+        )
+
+    seen, stock_items, market_items = set(), [], []
+
+    def _fetch_one(name, url, n, is_stock=False):
+        items = _fetch_rss(url, max_items=n,
+                           source_override=name if "bloomberg" in url.lower() else "")
+        return items, is_stock
+
+    all_feeds = [(name, url, n, True)  for name, url, n in stock_feeds] + \
+                [(name, url, n, False) for name, url, n in market_feeds]
+
+    with ThreadPoolExecutor(max_workers=3) as ex:
+        futures = {ex.submit(_fetch_one, name, url, n, is_s): name
+                   for name, url, n, is_s in all_feeds}
+        for fut in as_completed(futures):
+            items, is_s = fut.result()
+            bucket = stock_items if is_s else market_items
+            for item in (items or []):
+                key = item["title"][:60]
+                if key not in seen:
+                    seen.add(key)
+                    bucket.append(item)
+
+    # 종목 관련 뉴스 우선, 나머지는 날짜순 보완
+    stock_items.sort(key=lambda x: x.get("dt",""), reverse=True)
+    market_items.sort(key=lambda x: x.get("dt",""), reverse=True)
+    result = stock_items + [i for i in market_items if i["title"][:60] not in {s["title"][:60] for s in stock_items}]
+    return result[:max_items]
+
+
 def _fetch_stock_news(code: str, max_items: int = 8) -> list:
     """Naver 모바일 종목 뉴스 클러스터에서 최신 기사 목록 반환."""
     try:
@@ -2607,27 +2698,32 @@ def get_sector_trend(code):
                 "years": yrs, "revenue": rev, "op_profit": opl,
             }
 
-    # ── 9. 종목 뉴스 (캐시에는 있지만 TTL 내 재활용) ────────────
-    news = _fetch_stock_news(code, max_items=8)
+    # ── 9. 뉴스 (한국 + 해외 병렬 수집) ────────────────────────
+    with ThreadPoolExecutor(max_workers=2) as _ex:
+        _kr_fut  = _ex.submit(_fetch_stock_news, code, 8)
+        _en_fut  = _ex.submit(_fetch_foreign_news, name, code, 8)
+    news         = _kr_fut.result()
+    news_foreign = _en_fut.result()
 
     result = {
-        "code":        code,
-        "name":        name,
-        "sector":      sector,
-        "items":       items[:15],
-        "mcap_rank":   mcap_rank,
-        "peer_count":  len(items),
-        "total_mcap":  total_mcap,
-        "sector_per":  sector_per,
-        "sector_pbr":  sector_pbr,
-        "sector_roe":  sector_roe,
-        "main_per":    main_per,
-        "main_pbr":    main_pbr,
-        "main_roe":    main_roe,
-        "theme":       theme,
-        "main_fin":    main_fin,
-        "news":        news,
-        "_source":     "dart+naver",
+        "code":         code,
+        "name":         name,
+        "sector":       sector,
+        "items":        items[:15],
+        "mcap_rank":    mcap_rank,
+        "peer_count":   len(items),
+        "total_mcap":   total_mcap,
+        "sector_per":   sector_per,
+        "sector_pbr":   sector_pbr,
+        "sector_roe":   sector_roe,
+        "main_per":     main_per,
+        "main_pbr":     main_pbr,
+        "main_roe":     main_roe,
+        "theme":        theme,
+        "main_fin":     main_fin,
+        "news":         news,
+        "news_foreign": news_foreign,
+        "_source":      "dart+naver+rss",
     }
     _sector_cache[code] = {"data": result, "ts": now}
     return jsonify(result)

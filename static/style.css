@@ -721,6 +721,35 @@ canvas { display: block; }
 .news-title { font-size: 14px; font-weight: 500; line-height: 1.5; color: var(--text); margin-bottom: 3px; }
 .news-body { font-size: 12px; color: var(--text-muted); line-height: 1.5; }
 
+/* ── 뉴스 탭 ────────────────────────────────────────────────── */
+.news-tab-nav {
+  display: flex; gap: 4px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 0;
+}
+.news-tab-btn {
+  padding: 7px 16px; font-size: 13px; font-weight: 500;
+  color: var(--text-muted); background: none; border: none;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+  cursor: pointer; transition: color .15s, border-color .15s;
+  display: flex; align-items: center; gap: 6px;
+}
+.news-tab-btn:hover { color: var(--text); }
+.news-tab-btn.active { color: var(--blue); border-bottom-color: var(--blue); }
+.news-tab-cnt {
+  font-size: 11px; font-weight: 600;
+  background: var(--bg-hover); color: var(--text-muted);
+  padding: 1px 6px; border-radius: 10px;
+}
+.news-tab-btn.active .news-tab-cnt {
+  background: var(--blue-dim); color: var(--blue);
+}
+.news-source.en {
+  color: #0969da;
+  background: #ddf4ff;
+}
+
 /* ── 판매관리비 세부 ─────────────────────────────────────────── */
 .sga-list { display: flex; flex-direction: column; gap: 8px; padding: 4px 0; }
 .sga-row  {
