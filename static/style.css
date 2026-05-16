@@ -844,6 +844,28 @@ canvas { display: block; }
 
 .psr-chart-title { font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 6px; }
 
+/* ── 인력분석 확장 ───────────────────────────────────────────── */
+.hr-productivity {
+  display: flex; gap: 12px; flex-wrap: wrap; padding: 4px 0 8px;
+}
+.hr-prod-item {
+  flex: 1; min-width: 140px;
+  background: var(--bg-hover); border-radius: var(--radius-sm); padding: 12px 14px;
+}
+.hr-prod-label { font-size: 11px; color: var(--text-muted); margin-bottom: 4px; }
+.hr-prod-value { font-size: 18px; font-weight: 700; line-height: 1.2; }
+.hr-prod-note  { font-size: 11px; color: var(--text-faint); margin-top: 3px; }
+
+.hr-rnd-body       { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; padding-top: 4px; }
+.hr-rnd-stats      { display: flex; gap: 12px; flex-wrap: wrap; flex: 1; }
+.hr-rnd-stat       {
+  flex: 1; min-width: 120px;
+  background: var(--bg-hover); border-radius: var(--radius-sm); padding: 12px 14px; text-align: center;
+}
+.hr-rnd-stat-val   { font-size: 22px; font-weight: 700; color: var(--blue); line-height: 1.2; }
+.hr-rnd-stat-lbl   { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+.hr-rnd-donut-wrap { flex: 0 0 260px; }
+
 /* ── 애널리스트 컨센서스 ─────────────────────────────────────── */
 .analyst-body { display: flex; flex-direction: column; gap: 20px; padding-top: 4px; }
 

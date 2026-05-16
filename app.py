@@ -710,22 +710,38 @@ def _fetch_dart_shares(code):
 
 
 def _parse_emp_year(items):
-    """DART empSttus 목록 → 연도별 요약 딕셔너리 (인원수·급여).
+    """DART empSttus 목록 → 연도별 요약 딕셔너리 (인원수·급여·근속연수).
 
     삼성전자처럼 남·여 행만 있고 합계 행이 없는 경우도 처리.
+    - jan_salary_am : 1인평균급여 (원 단위) → 백만원으로 변환
+    - avrg_cnwk_sdytrn : 평균근속연수 ('5년' 또는 '5.1' 형태)
     """
     def _i(s):
         try: return max(0, int(str(s or "0").replace(",", "")))
         except: return 0
-    def _f(s):
+    def _f_sal(s):
+        """원 단위 급여 문자열 → 백만원 float. '-' 이면 None."""
+        if not s or str(s).strip() in ("-", ""):
+            return None
         try:
-            v = float(str(s or "0").replace(",", ""))
-            return v if v > 0 else None
-        except: return None
+            v = float(str(s).replace(",", "").replace("원", "").strip())
+            return round(v / 1_000_000, 1) if v > 0 else None
+        except:
+            return None
+    def _f_tenure(s):
+        """'13.4' 또는 '5년' → float."""
+        if not s or str(s).strip() in ("-", ""):
+            return None
+        try:
+            v = float(str(s).replace("년", "").replace(",", "").strip())
+            return round(v, 1) if v > 0 else None
+        except:
+            return None
 
     male = female = total = regular = contract = 0
     m_reg = m_con = f_reg = f_con = 0
-    avg_sal = None
+    avg_sal = avg_tenure = None
+    m_sal = f_sal = m_tenure = f_tenure = None
 
     # "성별합계" fo_bbm이 있으면 그것만 사용, 없으면 모든 행 집계 (SK하이닉스 등)
     has_summary = any(str(it.get("fo_bbm") or "").strip() == "성별합계" for it in items)
@@ -739,17 +755,24 @@ def _parse_emp_year(items):
         sm  = _i(item.get("sm"))
         r   = _i(item.get("rgllbr_co"))
         c   = _i(item.get("cnttk_co"))
-        sal = _f(item.get("avg_sal"))
+        # DART 실제 필드명: jan_salary_am (1인평균급여, 원 단위)
+        sal     = _f_sal(item.get("jan_salary_am") or item.get("avg_sal"))
+        tenure  = _f_tenure(item.get("avrg_cnwk_sdytrn") or item.get("avg_cntwk_frmtm_yrs"))
 
         if sex in ("남", "남성"):
             male  += sm; m_reg += r; m_con += c
+            if sal:    m_sal    = sal
+            if tenure: m_tenure = tenure
         elif sex in ("여", "여성"):
             female += sm; f_reg += r; f_con += c
+            if sal:    f_sal    = sal
+            if tenure: f_tenure = tenure
         else:                               # 합계 행 (있는 경우)
             total    = sm
             regular  = r
             contract = c
-            if sal: avg_sal = sal
+            if sal:    avg_sal    = sal
+            if tenure: avg_tenure = tenure
 
     # 합계 행이 없으면 남+여로 계산
     if total == 0:
@@ -761,8 +784,28 @@ def _parse_emp_year(items):
     if regular == 0 and total > 0:
         regular = total          # 계약직 데이터 없으면 전원 정규직으로 처리
 
+    # avg_salary: 합계 행 없으면 남·여 가중평균
+    if avg_sal is None:
+        if m_sal and f_sal and male and female:
+            avg_sal = round((m_sal * male + f_sal * female) / (male + female), 1)
+        elif m_sal:
+            avg_sal = m_sal
+        elif f_sal:
+            avg_sal = f_sal
+
+    # avg_tenure: 합계 행 없으면 남·여 가중평균
+    if avg_tenure is None:
+        if m_tenure and f_tenure and male and female:
+            avg_tenure = round((m_tenure * male + f_tenure * female) / (male + female), 1)
+        elif m_tenure:
+            avg_tenure = m_tenure
+        elif f_tenure:
+            avg_tenure = f_tenure
+
     return {"total": total, "male": male, "female": female,
-            "regular": regular, "contract": contract, "avg_salary": avg_sal}
+            "regular": regular, "contract": contract,
+            "avg_salary": avg_sal, "avg_tenure": avg_tenure,
+            "male_salary": m_sal, "female_salary": f_sal}
 
 
 def _fetch_dart_employees(code):
@@ -1534,7 +1577,7 @@ def get_financials(code):
 
 @app.route("/api/employees/<code>")
 def get_employee_stats(code):
-    """3개년 직원현황 (총원·성별·고용형태·평균급여)."""
+    """3개년 직원현황 + R&D 비율 + 재무지표 (1인당 계산용)."""
     if not DART_KEY:
         return jsonify({"years": [], "error": "DART API 키 없음"})
     _corps_ready.wait(5)
@@ -1546,7 +1589,10 @@ def get_employee_stats(code):
     cur_year  = datetime.now().year
     year_rows = []
 
-    for year in range(cur_year - 1, cur_year - 4, -1):
+    from concurrent.futures import ThreadPoolExecutor
+
+    # empSttus + R&D 섹션 병렬 조회
+    def _fetch_emp(year):
         data = _dart_get("empSttus.json", {
             "corp_code": corp_code, "bsns_year": str(year), "reprt_code": "11011",
         })
@@ -1554,20 +1600,57 @@ def get_employee_stats(code):
             parsed = _parse_emp_year(data["list"])
             if parsed["total"] > 0:
                 parsed["year"] = str(year)
-                year_rows.append(parsed)
+                return parsed
+        return None
+
+    latest_year = cur_year - 1
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        emp_futs = {year: ex.submit(_fetch_emp, year) for year in range(latest_year, latest_year - 3, -1)}
+        rnd_fut  = ex.submit(_fetch_dart_rnd_section, corp_code, latest_year)
+
+    for year in sorted(emp_futs):
+        result = emp_futs[year].result()
+        if result:
+            year_rows.append(result)
 
     if not year_rows:
         return jsonify({"years": [], "error": "직원현황 데이터 없음"})
 
     year_rows.sort(key=lambda x: x["year"])
+
+    # R&D 섹션 데이터
+    rnd_data = rnd_fut.result() or {}
+
+    # 재무 데이터 (1인당 계산용) - 가장 최근 연도
+    dart_fin = get_dart_financials(code) if DART_KEY else None
+    per_emp_revenue = per_emp_op = None
+    if dart_fin:
+        rev_list = (dart_fin.get("income_statement") or {}).get("revenue", [])
+        op_list  = (dart_fin.get("income_statement") or {}).get("operating_profit", [])
+        emp_last = year_rows[-1]["total"] if year_rows else 0
+        if rev_list and emp_last > 0:
+            rev_ok = rev_list[-1]  # 억원
+            if rev_ok:
+                per_emp_revenue = round(rev_ok / emp_last, 4)  # 억원/명
+        if op_list and emp_last > 0:
+            op_ok = op_list[-1]   # 억원
+            if op_ok:
+                per_emp_op = round(op_ok / emp_last, 4)  # 억원/명
+
     return jsonify({
-        "years":      [d["year"]       for d in year_rows],
-        "total":      [d["total"]      for d in year_rows],
-        "male":       [d["male"]       for d in year_rows],
-        "female":     [d["female"]     for d in year_rows],
-        "regular":    [d["regular"]    for d in year_rows],
-        "contract":   [d["contract"]   for d in year_rows],
-        "avg_salary": [d["avg_salary"] for d in year_rows],
+        "years":          [d["year"]          for d in year_rows],
+        "total":          [d["total"]          for d in year_rows],
+        "male":           [d["male"]           for d in year_rows],
+        "female":         [d["female"]         for d in year_rows],
+        "regular":        [d["regular"]        for d in year_rows],
+        "contract":       [d["contract"]       for d in year_rows],
+        "avg_salary":     [d["avg_salary"]     for d in year_rows],
+        "avg_tenure":     [d["avg_tenure"]     for d in year_rows],
+        "male_salary":    [d.get("male_salary")   for d in year_rows],
+        "female_salary":  [d.get("female_salary") for d in year_rows],
+        "rnd":            rnd_data,
+        "per_emp_revenue": per_emp_revenue,
+        "per_emp_op":      per_emp_op,
     })
 
 
@@ -2514,6 +2597,131 @@ _HK_HDR = {
     "Accept-Language": "ko-KR,ko;q=0.9",
     "Referer": "https://markets.hankyung.com/",
 }
+
+
+def _fetch_dart_rnd_section(corp_code: str, year: int) -> dict:
+    """DART 사업보고서 R&D 섹션 → 비용비율·R&D 인력수 파싱.
+
+    Returns dict with keys (all optional):
+      rnd_ratio     : float  (매출액 대비 R&D 비율, %)
+      rnd_expense   : int    (R&D 비용 총계, 백만원)
+      rnd_headcount : int    (R&D 담당 인력수)
+    """
+    from bs4 import BeautifulSoup as _BS
+    import re as _re
+
+    try:
+        # 1) 연간 보고서 목록
+        report_data = _dart_get("list.json", {
+            "corp_code": corp_code,
+            "bgn_de": f"{year}0101",
+            "end_de": f"{year}1231",
+            "pblntf_ty": "A",
+            "page_no": "1",
+            "page_count": "5",
+        })
+        if not report_data or not report_data.get("list"):
+            return {}
+        rcpt = None
+        for it in report_data["list"]:
+            if "사업보고서" in (it.get("report_nm") or ""):
+                rcpt = it.get("rcept_no")
+                break
+        if not rcpt:
+            return {}
+
+        # 2) 문서 목차 파싱
+        r = requests.get(
+            f"https://dart.fss.or.kr/dsaf001/main.do?rcpNo={rcpt}",
+            headers={"User-Agent": "Mozilla/5.0"}, timeout=10,
+        )
+        src = r.text
+        texts   = _re.findall(r"node\d+\['text'\]\s*=\s*[\"']([^\"']*)[\"']", src)
+        dcms    = _re.findall(r"node\d+\['dcmNo'\]\s*=\s*[\"']([^\"']*)[\"']", src)
+        eles    = _re.findall(r"node\d+\['eleId'\]\s*=\s*[\"']([^\"']*)[\"']", src)
+        offsets = _re.findall(r"node\d+\['offset'\]\s*=\s*[\"']([^\"']*)[\"']", src)
+        lengths = _re.findall(r"node\d+\['length'\]\s*=\s*[\"']([^\"']*)[\"']", src)
+
+        rnd_idx = None
+        for i, t in enumerate(texts):
+            if "연구개발" in t and i < len(dcms):
+                rnd_idx = i
+                break
+        if rnd_idx is None:
+            return {}
+
+        # 3) R&D 섹션 HTML 가져오기
+        r2 = requests.get(
+            "https://dart.fss.or.kr/report/viewer.do",
+            params={
+                "rcpNo": rcpt, "dcmNo": dcms[rnd_idx], "eleId": eles[rnd_idx],
+                "offset": offsets[rnd_idx], "length": lengths[rnd_idx], "dtd": "dart4.xsd",
+            },
+            headers={"User-Agent": "Mozilla/5.0"}, timeout=15,
+        )
+        text = _BS(r2.text, "html.parser").get_text()
+
+        result = {}
+
+        # 4) R&D 비율 — Samsung: "비율\n11.6%", Robotis: "9,224,788(30.71%)"
+        # Samsung 스타일: 비율 레이블 뒤에 첫 번째 퍼센트 값
+        m = _re.search(r"연구개발비\s*/\s*매출액\s+비율[\s\S]{0,300}?([\d]+\.?\d*)%", text)
+        if m:
+            try:
+                result["rnd_ratio"] = float(m.group(1))
+            except Exception:
+                pass
+        if "rnd_ratio" not in result:
+            # Robotis 스타일: NNN(XX.XX%) — 가장 마지막 항목이 최신 연도
+            matches = _re.findall(r"[\d,]+\(([\d.]+)%\)", text)
+            if matches:
+                try:
+                    result["rnd_ratio"] = float(matches[-1])
+                except Exception:
+                    pass
+
+        # 5) R&D 비용 (최신 연도 합계, 백만원 기준)
+        m = _re.search(r"연구개발비용\s+총계\s+([\d,]+)", text)
+        if m:
+            try:
+                result["rnd_expense"] = int(m.group(1).replace(",", ""))
+            except Exception:
+                pass
+        if "rnd_expense" not in result:
+            # Robotis 스타일: NNN(XX.XX%) — 가장 마지막 항목
+            matches = _re.findall(r"([\d,]+)\([\d.]+%\)", text)
+            if matches:
+                try:
+                    raw_val = int(matches[-1].replace(",", ""))
+                    unit_match = _re.search(r"단위\s*:\s*(천원|백만원|억원)", text)
+                    unit = (unit_match.group(1) if unit_match else "백만원")
+                    if unit == "천원":
+                        raw_val = raw_val // 1000
+                    elif unit == "억원":
+                        raw_val = raw_val * 100
+                    result["rnd_expense"] = raw_val
+                except Exception:
+                    pass
+
+        # 6) R&D 담당 인력 수
+        for patt in [
+            r"연구개발\s+담당\s+인력\s*[：:·]?\s*총?\s*([\d,]+)\s*명",
+            r"연구담당\s*인력\s*[：:·]?\s*([\d,]+)\s*명",
+            r"연구인력\s*[：:·]?\s*([\d,]+)\s*명",
+            r"R&D\s+인력\s*[：:·]?\s*([\d,]+)\s*명",
+            r"연구개발\s*인력\s+([\d,]+)\s*명",
+        ]:
+            m = _re.search(patt, text)
+            if m:
+                try:
+                    result["rnd_headcount"] = int(m.group(1).replace(",", ""))
+                except Exception:
+                    pass
+                break
+
+        return result
+    except Exception:
+        return {}
 
 
 def _fetch_hankyung_consensus(code: str) -> dict:

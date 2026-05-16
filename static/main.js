@@ -1202,16 +1202,28 @@ function renderHR(hr) {
     return;
   }
 
-  const li  = hr.years.length - 1;
-  const tot = hr.total[li]   || 0;
-  const reg = hr.regular[li] || 0;
-  const con = hr.contract[li]|| 0;
-  const mal = hr.male[li]    || 0;
-  const fem = hr.female[li]  || 0;
-  const sal = hr.avg_salary[li];
+  const li     = hr.years.length - 1;
+  const tot    = hr.total[li]      || 0;
+  const reg    = hr.regular[li]    || 0;
+  const con    = hr.contract[li]   || 0;
+  const mal    = hr.male[li]       || 0;
+  const fem    = hr.female[li]     || 0;
+  const sal    = hr.avg_salary[li];
+  const tenure = hr.avg_tenure ? hr.avg_tenure[li] : null;
+  const mSal   = hr.male_salary   ? hr.male_salary[li]   : null;
+  const fSal   = hr.female_salary ? hr.female_salary[li] : null;
+
+  const rnd          = hr.rnd || {};
+  const rndRatio     = rnd.rnd_ratio     ?? null;
+  const rndHeadcount = rnd.rnd_headcount ?? null;
+  const rndExpense   = rnd.rnd_expense   ?? null;
+
+  const perRev = hr.per_emp_revenue;  // 억원/명
+  const perOp  = hr.per_emp_op;       // 억원/명
 
   const regRatio = tot > 0 ? (reg / tot * 100).toFixed(1) : null;
   const femRatio = (mal + fem) > 0 ? (fem / (mal + fem) * 100).toFixed(1) : null;
+  const rndRatioOfEmp = (rndHeadcount && tot > 0) ? (rndHeadcount / tot * 100).toFixed(1) : null;
 
   const prevTot = li > 0 ? (hr.total[li - 1] || 0) : null;
   const yoyPct  = prevTot && prevTot > 0
@@ -1220,15 +1232,80 @@ function renderHR(hr) {
     ? (parseFloat(yoyPct) >= 0 ? `▲ ${yoyPct}% YoY` : `▼ ${Math.abs(parseFloat(yoyPct))}% YoY`)
     : hr.years[li] + '년 기준';
 
+  // KPI 카드
   const kpiItems = [
-    { label: '전체 직원수', value: tot.toLocaleString('ko-KR') + '명', note: totNote },
-    { label: '정규직 비율', value: regRatio != null ? regRatio + '%' : '-',
+    { label: '전체 직원수',  value: tot.toLocaleString('ko-KR') + '명', note: totNote },
+    { label: '정규직 비율',  value: regRatio != null ? regRatio + '%' : '-',
       note: reg > 0 ? `정규직 ${reg.toLocaleString('ko-KR')}명` : '-' },
-    { label: '여성 비율',   value: femRatio != null ? femRatio + '%' : '-',
+    { label: '여성 비율',    value: femRatio != null ? femRatio + '%' : '-',
       note: (mal > 0 || fem > 0) ? `남 ${mal.toLocaleString('ko-KR')} · 여 ${fem.toLocaleString('ko-KR')}명` : '-' },
-    { label: '평균급여',    value: sal != null ? sal.toFixed(0) + '백만원' : '-',
+    { label: '평균급여',     value: sal != null ? Math.round(sal) + '백만원' : '-',
       note: sal != null ? '연간 1인 기준' : 'DART 미공시' },
+    { label: '평균근속연수', value: tenure != null ? tenure.toFixed(1) + '년' : '-',
+      note: tenure != null ? hr.years[li] + '년 기준' : 'DART 미공시' },
+    { label: 'R&D 비용비율', value: rndRatio != null ? rndRatio.toFixed(1) + '%' : '-',
+      note: rndExpense != null ? `R&D ${Math.round(rndExpense/1000).toLocaleString('ko-KR')}십억원` : '매출 대비' },
   ];
+
+  // 1인당 생산성 섹션
+  const productivityHtml = (perRev != null || perOp != null) ? `
+    <div class="card">
+      <div class="card-header">1인당 생산성 <span class="card-sub">${hr.years[li]}년 기준</span></div>
+      <div class="hr-productivity">
+        ${perRev != null ? `
+        <div class="hr-prod-item">
+          <div class="hr-prod-label">1인당 매출액</div>
+          <div class="hr-prod-value">${(perRev * 10).toLocaleString('ko-KR', {minimumFractionDigits:1, maximumFractionDigits:1})}십억원</div>
+          <div class="hr-prod-note">연결 매출 ÷ 전체 인원</div>
+        </div>` : ''}
+        ${perOp != null ? `
+        <div class="hr-prod-item">
+          <div class="hr-prod-label">1인당 영업이익</div>
+          <div class="hr-prod-value ${parseFloat(perOp) >= 0 ? 'up' : 'down'}">${(perOp * 10).toLocaleString('ko-KR', {minimumFractionDigits:1, maximumFractionDigits:1})}십억원</div>
+          <div class="hr-prod-note">연결 영업이익 ÷ 전체 인원</div>
+        </div>` : ''}
+        ${(mSal != null || fSal != null) ? `
+        <div class="hr-prod-item">
+          <div class="hr-prod-label">남성 평균급여</div>
+          <div class="hr-prod-value">${mSal != null ? Math.round(mSal) + '백만원' : '-'}</div>
+          <div class="hr-prod-note">여성: ${fSal != null ? Math.round(fSal) + '백만원' : '-'}</div>
+        </div>` : ''}
+      </div>
+    </div>` : '';
+
+  // R&D 섹션
+  const rndSection = (rndRatio != null || rndHeadcount != null) ? `
+    <div class="card">
+      <div class="card-header">연구개발(R&D) 인력 <span class="src-badge dart" style="font-size:9px">DART</span></div>
+      <div class="hr-rnd-body">
+        <div class="hr-rnd-stats">
+          ${rndHeadcount != null ? `
+          <div class="hr-rnd-stat">
+            <div class="hr-rnd-stat-val">${rndHeadcount.toLocaleString('ko-KR')}명</div>
+            <div class="hr-rnd-stat-lbl">R&D 인력</div>
+          </div>` : ''}
+          ${rndRatioOfEmp != null ? `
+          <div class="hr-rnd-stat">
+            <div class="hr-rnd-stat-val">${rndRatioOfEmp}%</div>
+            <div class="hr-rnd-stat-lbl">전체 중 R&D 비중</div>
+          </div>` : ''}
+          ${rndRatio != null ? `
+          <div class="hr-rnd-stat">
+            <div class="hr-rnd-stat-val">${rndRatio.toFixed(1)}%</div>
+            <div class="hr-rnd-stat-lbl">매출 대비 R&D 비용</div>
+          </div>` : ''}
+          ${rndExpense != null ? `
+          <div class="hr-rnd-stat">
+            <div class="hr-rnd-stat-val">${(rndExpense/1000).toLocaleString('ko-KR', {minimumFractionDigits:0, maximumFractionDigits:0})}십억원</div>
+            <div class="hr-rnd-stat-lbl">R&D 비용 (${hr.years[li]})</div>
+          </div>` : ''}
+        </div>
+        ${rndHeadcount != null && tot > 0 ? `
+        <div class="hr-rnd-donut-wrap">
+          <div class="chart-wrap" style="height:160px;max-width:260px"><canvas id="hrRndChart"></canvas></div>
+        </div>` : ''}
+      </div>
+    </div>` : '';
 
   container.innerHTML = `
     <div class="kpi-row">
@@ -1239,6 +1316,8 @@ function renderHR(hr) {
           <div class="kpi-note">${k.note}</div>
         </div>`).join('')}
     </div>
+    ${rndSection}
+    ${productivityHtml}
     <div class="grid-2-1">
       <div class="card">
         <div class="card-header">연도별 직원수 추이 <span class="card-sub">명</span></div>
@@ -1285,6 +1364,31 @@ function renderHR(hr) {
         },
       }
     );
+
+    // R&D 도넛 (headcount 있을 때만)
+    destroyChart('hrRnd');
+    if (rndHeadcount != null && tot > 0 && document.getElementById('hrRndChart')) {
+      const nonRnd = Math.max(0, tot - rndHeadcount);
+      charts.hrRnd = new Chart(
+        document.getElementById('hrRndChart').getContext('2d'), {
+          type: 'doughnut',
+          data: {
+            labels: ['R&D 인력', '비R&D'],
+            datasets: [{ data: [rndHeadcount, nonRnd],
+              backgroundColor: ['#2f81f7aa', '#e0e4eaaa'],
+              borderColor:     ['#2f81f7',   '#c8d3dc'], borderWidth: 1.5 }],
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            plugins: {
+              legend: { position: 'right', labels: { font: { family: FONT, size: 11 }, boxWidth: 10, padding: 6 } },
+              tooltip: { callbacks: { label: ctx => `${ctx.label}: ${ctx.parsed.toLocaleString('ko-KR')}명 (${(ctx.parsed/tot*100).toFixed(1)}%)` } },
+            },
+            cutout: '60%',
+          },
+        }
+      );
+    }
 
     // 고용형태 도넛
     destroyChart('hrEmpl');
@@ -1337,15 +1441,16 @@ function renderHR(hr) {
 
   // 연도별 상세 테이블
   const tHead = `<thead><tr>
-    <th>연도</th><th>전체</th><th>정규직</th><th>계약직</th><th>남성</th><th>여성</th><th>평균급여</th>
+    <th>연도</th><th>전체</th><th>정규직</th><th>계약직</th><th>남성</th><th>여성</th><th>평균급여</th><th>근속연수</th>
   </tr></thead>`;
   const tBody = hr.years.map((y, i) => {
-    const t = hr.total[i] || 0;
-    const r = hr.regular[i]  || 0;
-    const c = hr.contract[i] || 0;
-    const m = hr.male[i]     || 0;
-    const f = hr.female[i]   || 0;
-    const s = hr.avg_salary[i];
+    const t  = hr.total[i]      || 0;
+    const r  = hr.regular[i]    || 0;
+    const c  = hr.contract[i]   || 0;
+    const m  = hr.male[i]       || 0;
+    const f  = hr.female[i]     || 0;
+    const s  = hr.avg_salary[i];
+    const tn = hr.avg_tenure ? hr.avg_tenure[i] : null;
     const regPct = t > 0 && r > 0 ? `<span style="font-size:10px;color:var(--text-faint)">(${(r/t*100).toFixed(1)}%)</span>` : '';
     return `<tr>
       <td style="text-align:center">${y}</td>
@@ -1354,7 +1459,8 @@ function renderHR(hr) {
       <td>${c > 0 ? c.toLocaleString('ko-KR') : '-'}</td>
       <td>${m > 0 ? m.toLocaleString('ko-KR') : '-'}</td>
       <td>${f > 0 ? f.toLocaleString('ko-KR') : '-'}</td>
-      <td>${s != null ? s.toFixed(0) + '백만원' : '-'}</td>
+      <td>${s != null ? Math.round(s) + '백만원' : '-'}</td>
+      <td>${tn != null ? tn.toFixed(1) + '년' : '-'}</td>
     </tr>`;
   }).join('');
   document.getElementById('hrTable').innerHTML = tHead + '<tbody>' + tBody + '</tbody>';
