@@ -180,16 +180,18 @@ async function loadCompany(code) {
   switchTab('overview', false);
 
   // 데이터 병렬 로드
-  const [stockRes, finRes, compRes, aiRes] = await Promise.all([
+  const [stockRes, finRes, compRes, aiRes, analystRes] = await Promise.all([
     fetch(`/api/stock/${code}`),
     fetch(`/api/financials/${code}`),
     fetch(`/api/competitors/${code}`),
     fetch(`/api/ai-report/${code}`),
+    fetch(`/api/analyst/${code}`),
   ]);
-  const stock = await stockRes.json();
-  const fin   = await finRes.json();
-  const comp  = await compRes.json();
-  const ai    = await aiRes.json();
+  const stock    = await stockRes.json();
+  const fin      = await finRes.json();
+  const comp     = await compRes.json();
+  const ai       = await aiRes.json();
+  const analyst  = await analystRes.json();
 
   renderHeader(stock.info);
   renderOverview(stock);
@@ -197,6 +199,7 @@ async function loadCompany(code) {
   renderCapex(fin, stock);
   renderRnd(fin, stock);
   renderCompetitors(comp);
+  renderAnalyst(analyst, stock.info);
   renderAiReport(ai);
 }
 
@@ -1541,6 +1544,129 @@ function renderCompetitors(rows) {
       },
     }
   );
+}
+
+/* ── 애널리스트 컨센서스 ────────────────────────────────────── */
+function renderAnalyst(data, info) {
+  const el = document.getElementById('analystContent');
+  if (!el) return;
+
+  const hk  = data.hankyung || {};
+  const nv  = data.naver    || {};
+
+  const curPrice = nv.cur_price || hk.cur_price || info?.current_price || 0;
+  const nvTgt    = nv.target_price;
+  const hkTgt    = hk.target_price;
+  const nvUpside = nv.upside;
+  const hkUpside = hk.upside;
+  const opinion  = nv.opinion || hk.opinion || '-';
+  const rm       = nv.recomm_mean;
+  const reports  = hk.reports || [];
+
+  // 투자의견 색상
+  const opCls = { '강력매수':'chip-green','매수':'chip-green','중립':'chip-yellow',
+                  '비중축소':'chip-red','매도':'chip-red' };
+  const opChip = opinion !== '-'
+    ? `<span class="analyst-chip ${opCls[opinion]||'chip-yellow'}">${opinion}</span>` : '';
+
+  // 상승여력 표시
+  function upsideHtml(u) {
+    if (u == null) return '-';
+    const cls = u >= 0 ? 'up' : 'down';
+    return `<span class="${cls}">${u >= 0 ? '+' : ''}${u.toFixed(1)}%</span>`;
+  }
+
+  // 목표주가 게이지
+  function gaugeHtml(cur, tgt, label) {
+    if (!cur || !tgt) return '';
+    const lo  = Math.min(cur, tgt) * 0.85;
+    const hi  = Math.max(cur, tgt) * 1.15;
+    const rng = hi - lo;
+    const curPct = ((cur - lo) / rng * 100).toFixed(1);
+    const tgtPct = ((tgt - lo) / rng * 100).toFixed(1);
+    const upside = ((tgt - cur) / cur * 100).toFixed(1);
+    const uCls   = tgt >= cur ? 'up' : 'down';
+    return `
+      <div class="analyst-gauge-wrap">
+        <div class="analyst-gauge-label">${label}</div>
+        <div class="analyst-gauge-track">
+          <div class="analyst-gauge-fill ${tgt>=cur?'positive':'negative'}" style="left:${Math.min(curPct,tgtPct)}%;width:${Math.abs(tgtPct-curPct)}%"></div>
+          <div class="analyst-gauge-cur"  style="left:${curPct}%">
+            <div class="analyst-gauge-dot cur"></div>
+            <div class="analyst-gauge-cur-lbl">${fmtPrice(cur)}</div>
+          </div>
+          <div class="analyst-gauge-tgt"  style="left:${tgtPct}%">
+            <div class="analyst-gauge-dot tgt"></div>
+            <div class="analyst-gauge-tgt-lbl">${fmtPrice(tgt)}<span class="${uCls}" style="font-size:11px;margin-left:4px">${tgt>=cur?'+':''}${upside}%</span></div>
+          </div>
+        </div>
+        <div class="analyst-gauge-axis">
+          <span>${fmtPrice(Math.round(lo))}</span>
+          <span>${fmtPrice(Math.round(hi))}</span>
+        </div>
+      </div>`;
+  }
+
+  // 리포트 테이블
+  const reportRows = reports.map(r => `
+    <tr>
+      <td><span class="analyst-brokerage">${r.brokerage || '-'}</span></td>
+      <td class="analyst-analyst-name">${r.analyst || '-'}</td>
+      <td class="analyst-date">${r.date || '-'}</td>
+      <td>${r.url
+        ? `<a class="analyst-report-link" href="${r.url}" target="_blank" rel="noopener">${r.title || '리포트 보기'} ↗</a>`
+        : (r.title || '-')}</td>
+    </tr>`).join('');
+
+  // 추천점수 바 (1~5)
+  const rmBar = rm != null ? `
+    <div class="analyst-rm-wrap">
+      <div class="analyst-rm-labels"><span>매도</span><span>비중축소</span><span>중립</span><span>매수</span><span>강력매수</span></div>
+      <div class="analyst-rm-track">
+        <div class="analyst-rm-fill" style="width:${((rm-1)/4*100).toFixed(1)}%"></div>
+        <div class="analyst-rm-dot"  style="left:${((rm-1)/4*100).toFixed(1)}%"></div>
+      </div>
+      <div class="analyst-rm-score">${rm.toFixed(2)} / 5.00</div>
+    </div>` : '';
+
+  el.innerHTML = `
+    <div class="card">
+      <div class="card-header">
+        📊 애널리스트 컨센서스
+        <span class="src-badge dart" style="font-size:9px">한경+Naver</span>
+      </div>
+      <div class="analyst-body">
+        <div class="analyst-summary">
+          <div class="analyst-kpis">
+            <div class="analyst-kpi">
+              <div class="analyst-kpi-label">투자의견</div>
+              <div class="analyst-kpi-value">${opChip || opinion}</div>
+              ${rmBar}
+            </div>
+            <div class="analyst-kpi">
+              <div class="analyst-kpi-label">컨센서스 목표가 <span class="analyst-src">Naver</span></div>
+              <div class="analyst-kpi-value">${nvTgt ? fmtPrice(nvTgt) : '-'}</div>
+              <div class="analyst-kpi-note">상승여력 ${upsideHtml(nvUpside)}</div>
+            </div>
+            <div class="analyst-kpi">
+              <div class="analyst-kpi-label">한경 컨센서스 목표가</div>
+              <div class="analyst-kpi-value">${hkTgt ? fmtPrice(hkTgt) : '-'}</div>
+              <div class="analyst-kpi-note">상승여력 ${upsideHtml(hkUpside)}</div>
+            </div>
+          </div>
+          ${gaugeHtml(curPrice, nvTgt, 'Naver 컨센서스 목표주가')}
+          ${nvTgt !== hkTgt ? gaugeHtml(curPrice, hkTgt, '한경 컨센서스 목표주가') : ''}
+        </div>
+        ${reportRows ? `
+        <div class="analyst-reports">
+          <div class="analyst-reports-title">최근 리포트 <span class="analyst-src">한경 컨센서스</span></div>
+          <table class="analyst-table">
+            <thead><tr><th>증권사</th><th>애널리스트</th><th>날짜</th><th>제목</th></tr></thead>
+            <tbody>${reportRows}</tbody>
+          </table>
+        </div>` : ''}
+      </div>
+    </div>`;
 }
 
 /* ── AI 보고서 ─────────────────────────────────────────────── */

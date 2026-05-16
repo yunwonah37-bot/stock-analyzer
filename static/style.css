@@ -844,6 +844,113 @@ canvas { display: block; }
 
 .psr-chart-title { font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 6px; }
 
+/* ── 애널리스트 컨센서스 ─────────────────────────────────────── */
+.analyst-body { display: flex; flex-direction: column; gap: 20px; padding-top: 4px; }
+
+.analyst-kpis {
+  display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px;
+}
+.analyst-kpi {
+  flex: 1; min-width: 150px;
+  background: var(--bg-hover); border-radius: var(--radius-sm); padding: 12px 14px;
+}
+.analyst-kpi-label {
+  font-size: 11px; color: var(--text-muted); margin-bottom: 4px;
+  display: flex; align-items: center; gap: 6px;
+}
+.analyst-kpi-value { font-size: 18px; font-weight: 700; line-height: 1.3; }
+.analyst-kpi-note  { font-size: 12px; color: var(--text-muted); margin-top: 3px; }
+
+.analyst-chip {
+  display: inline-flex; align-items: center;
+  padding: 3px 12px; border-radius: 20px; font-size: 14px; font-weight: 700;
+}
+.analyst-src {
+  font-size: 10px; background: var(--bg-hover); border: 1px solid var(--border);
+  border-radius: 4px; padding: 1px 5px; color: var(--text-muted);
+}
+
+/* 목표주가 게이지 */
+.analyst-gauge-wrap {
+  margin-bottom: 16px; background: var(--bg-hover);
+  border-radius: var(--radius-sm); padding: 14px 16px 18px;
+}
+.analyst-gauge-label { font-size: 11px; color: var(--text-muted); margin-bottom: 24px; font-weight: 600; }
+.analyst-gauge-track {
+  position: relative; height: 8px; background: var(--border);
+  border-radius: 4px; margin-bottom: 36px;
+}
+.analyst-gauge-fill          { position: absolute; top: 0; height: 100%; border-radius: 4px; }
+.analyst-gauge-fill.positive { background: var(--green); opacity: .45; }
+.analyst-gauge-fill.negative { background: var(--red);   opacity: .45; }
+
+.analyst-gauge-cur,
+.analyst-gauge-tgt { position: absolute; top: -4px; transform: translateX(-50%); }
+
+.analyst-gauge-dot      { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--bg); margin: 0 auto; }
+.analyst-gauge-dot.cur  { background: var(--blue); }
+.analyst-gauge-dot.tgt  { background: var(--green); }
+
+.analyst-gauge-cur-lbl {
+  position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+  font-size: 11px; white-space: nowrap; color: var(--blue); font-weight: 600;
+}
+.analyst-gauge-tgt-lbl {
+  position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+  font-size: 11px; white-space: nowrap; color: var(--green); font-weight: 600;
+}
+.analyst-gauge-axis {
+  display: flex; justify-content: space-between;
+  font-size: 10px; color: var(--text-faint); margin-top: -28px;
+}
+
+/* 추천점수 바 */
+.analyst-rm-wrap   { margin-top: 10px; }
+.analyst-rm-labels {
+  display: flex; justify-content: space-between;
+  font-size: 10px; color: var(--text-muted); margin-bottom: 4px;
+}
+.analyst-rm-track {
+  position: relative; height: 6px; background: var(--border); border-radius: 3px;
+}
+.analyst-rm-fill {
+  position: absolute; top: 0; left: 0; height: 100%;
+  background: var(--blue); border-radius: 3px; opacity: .65;
+}
+.analyst-rm-dot {
+  position: absolute; top: -5px;
+  width: 16px; height: 16px; background: var(--blue);
+  border: 2px solid var(--bg); border-radius: 50%;
+  transform: translateX(-50%); box-shadow: 0 1px 3px rgba(0,0,0,.2);
+}
+.analyst-rm-score { text-align: right; font-size: 11px; color: var(--text-muted); margin-top: 8px; }
+
+/* 리포트 테이블 */
+.analyst-reports       { margin-top: 4px; }
+.analyst-reports-title {
+  font-size: 13px; font-weight: 600; color: var(--text);
+  margin-bottom: 10px; display: flex; align-items: center; gap: 8px;
+}
+.analyst-table { width: 100%; border-collapse: collapse; }
+.analyst-table th {
+  font-size: 11px; font-weight: 600; color: var(--text-muted);
+  padding: 6px 10px; text-align: left;
+  background: var(--bg-hover); border-bottom: 1px solid var(--border);
+}
+.analyst-table td {
+  font-size: 12px; padding: 8px 10px;
+  border-bottom: 1px solid var(--border); vertical-align: middle;
+}
+.analyst-brokerage {
+  display: inline-block; background: var(--blue-dim); color: var(--blue);
+  border-radius: var(--radius-sm); padding: 2px 8px;
+  font-size: 11px; font-weight: 600; white-space: nowrap;
+}
+.analyst-analyst-name,
+.analyst-date        { color: var(--text-muted); }
+.analyst-report-link { color: var(--blue); text-decoration: none; font-weight: 500; }
+.analyst-report-link:hover { text-decoration: underline; }
+
 /* ── 유틸 ──────────────────────────────────────────────────── */
 .up    { color: var(--red); }
 .down  { color: var(--blue); }

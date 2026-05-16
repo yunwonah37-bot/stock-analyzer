@@ -2613,11 +2613,16 @@ def _fetch_hankyung_consensus(code: str) -> dict:
             brokerage = parts[1] if len(parts) > 1 else ""
             date      = parts[2] if len(parts) > 2 else ""
 
+            a_tag = slide.find("a", href=True)
+            href  = a_tag["href"] if a_tag else None
+            url   = f"https://markets.hankyung.com{href}" if href else None
+
             reports.append({
                 "title":     title,
                 "analyst":   analyst,
                 "brokerage": brokerage,
                 "date":      date,
+                "url":       url,
             })
 
         # 상승여력 계산
@@ -2950,6 +2955,39 @@ def get_ai_report(code):
         if dart_fin:
             return jsonify(_analyze_dart(code, dart_fin))
     return jsonify(AI_REPORTS.get(code, AI_REPORTS["005930"]))
+
+
+@app.route("/api/analyst/<code>")
+def get_analyst(code):
+    """애널리스트 컨센서스: 한경 + 네이버 통합."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _naver():
+        yp = _fetch_realtime_price(code)
+        if not yp:
+            return {}
+        rm  = yp.get("recomm_mean")
+        tgt = yp.get("consensus_target")
+        if rm is not None:
+            if   rm >= 4.5: op = "강력매수"
+            elif rm >= 3.5: op = "매수"
+            elif rm >= 2.5: op = "중립"
+            elif rm >= 1.5: op = "비중축소"
+            else:            op = "매도"
+        else:
+            op = None
+        cur = yp.get("current_price")
+        upside = round((tgt - cur) / cur * 100, 1) if cur and tgt else None
+        return {"recomm_mean": rm, "opinion": op, "target_price": tgt,
+                "upside": upside, "cur_price": cur}
+
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        hk_fut = ex.submit(_fetch_hankyung_consensus, code)
+        nv_fut = ex.submit(_naver)
+    hk = hk_fut.result()
+    nv = nv_fut.result()
+
+    return jsonify({"hankyung": hk, "naver": nv})
 
 
 @app.route("/api/status")
