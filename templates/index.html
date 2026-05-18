@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>StockLens — 한국 주식 기업분석</title>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/style.css?v=14" />
+  <link rel="stylesheet" href="/static/style.css?v=18" />
   <script src="/static/vendor/chart.umd.min.js?v=2"></script>
 </head>
 <body>
@@ -105,6 +105,7 @@
         <div class="chart-wrap h250"><canvas id="revenueChart"></canvas></div>
       </div>
       <div id="psrCard"></div>
+      <div id="foreignOwnershipCard"></div>
     </div>
 
     <!-- ── 탭: 재무상세 ──────────────────────────────────────── -->
@@ -113,6 +114,7 @@
         <button class="sub-btn active" data-sub="income"   onclick="switchSubTab('income')">손익계산서</button>
         <button class="sub-btn"        data-sub="balance"  onclick="switchSubTab('balance')">재무상태표</button>
         <button class="sub-btn"        data-sub="cashflow" onclick="switchSubTab('cashflow')">현금흐름표</button>
+        <button class="sub-btn"        data-sub="turnover" onclick="switchSubTab('turnover')">자산회전율</button>
       </div>
 
       <!-- 손익계산서 -->
@@ -164,6 +166,11 @@
           </div>
         </div>
       </div>
+
+      <!-- 자산회전율 분석 -->
+      <div id="subtab-turnover" class="subtab-pane hidden">
+        <div id="turnoverContent"></div>
+      </div>
     </div>
 
     <!-- ── 탭: 시설투자 ──────────────────────────────────────── -->
@@ -201,6 +208,7 @@
 
     <!-- ── 탭: 경쟁사비교 ──────────────────────────────────── -->
     <div id="tab-competitors" class="tab-pane hidden">
+      <div id="compSearchBar"></div>
       <div class="card">
         <div class="card-header">핵심지표 비교</div>
         <div id="competitorTable"></div>
@@ -218,6 +226,10 @@
           <div class="card-header">수익성 비교 <span class="card-sub">ROE / 영업이익률</span></div>
           <div class="chart-wrap"><canvas id="compProfitChart"></canvas></div>
         </div>
+      </div>
+      <div class="card" id="compForeignCard" style="display:none">
+        <div class="card-header">외국인 지분율 비교 <span class="card-sub">%</span></div>
+        <div class="chart-wrap h260"><canvas id="compForeignChart"></canvas></div>
       </div>
     </div>
 
@@ -240,6 +252,6 @@
   </div><!-- /dashboard -->
 </main>
 
-<script src="/static/main.js?v=29"></script>
+<script src="/static/main.js?v=34"></script>
 </body>
 </html>

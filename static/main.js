@@ -9,6 +9,10 @@ let exportLoaded   = false;
 let sectorLoaded   = false;
 const charts       = {};
 
+// 경쟁사 직접 추가 상태
+let customCompetitors = [];   // [{code, name}]
+let compSearchTimer   = null;
+
 /* ── 숫자 포맷 ─────────────────────────────────────────────── */
 function fmtNum(n) {
   if (n == null || isNaN(n)) return '-';
@@ -169,10 +173,11 @@ async function loadCompany(code) {
   document.getElementById('dashboard').classList.add('show');
 
   // 첫 탭으로 리셋
-  hrLoaded     = false;
-  execLoaded   = false;
-  exportLoaded = false;
-  sectorLoaded = false;
+  hrLoaded          = false;
+  execLoaded        = false;
+  exportLoaded      = false;
+  sectorLoaded      = false;
+  customCompetitors = [];
   document.getElementById('hrContent').innerHTML     = '';
   document.getElementById('execContent').innerHTML   = '';
   document.getElementById('exportContent').innerHTML = '';
@@ -198,7 +203,7 @@ async function loadCompany(code) {
   renderFinancials(fin);
   renderCapex(fin, stock);
   renderRnd(fin, stock);
-  renderCompetitors(comp);
+  initCompetitorsUI(code, comp);
   renderAnalyst(analyst, stock.info);
   renderAiReport(ai);
 }
@@ -217,6 +222,12 @@ function renderHeader(info) {
   const priceBadge = info._price_source === 'realtime'
     ? '<span class="src-badge realtime">실시간 주가</span>'
     : '<span class="src-badge dummy">더미 주가</span>';
+  const fr = info.foreign_rate;
+  const frCls = fr == null ? '' : fr >= 40 ? 'fo-high' : fr >= 20 ? 'fo-mid' : 'fo-low';
+  const frBadge = fr != null
+    ? `<span class="ch-meta-item"><span class="label">외국인지분율</span><span class="fo-rate-badge ${frCls}">${fr.toFixed(1)}%</span></span>`
+    : '';
+
   document.getElementById('companyHeader').innerHTML = `
     <div class="ch-top">
       <div>
@@ -233,6 +244,7 @@ function renderHeader(info) {
       <span class="ch-meta-item"><span class="label">52주 최고</span>${fmtPrice(info.w52_high)}</span>
       <span class="ch-meta-item"><span class="label">52주 최저</span>${fmtPrice(info.w52_low)}</span>
       <span class="ch-meta-item"><span class="label">상장주식수</span>${Number(info.shares).toLocaleString('ko-KR')}주</span>
+      ${frBadge}
     </div>
     <div class="ch-desc">${info.description}</div>`;
 }
@@ -410,6 +422,9 @@ function renderOverview(data) {
 
   // PSR 분석 카드
   renderPsrCard(r);
+
+  // 외국인 지분율 카드
+  renderForeignOwnership(data.foreign_ownership);
 }
 
 function renderPsrCard(r) {
@@ -521,11 +536,149 @@ function renderPsrCard(r) {
   }
 }
 
+/* ── 외국인 지분율 ──────────────────────────────────────────── */
+function renderForeignOwnership(fo) {
+  const el = document.getElementById('foreignOwnershipCard');
+  if (!el) return;
+  if (!fo || fo.foreign_rate == null) { el.innerHTML = ''; return; }
+
+  const rate  = fo.foreign_rate;
+  const other = Math.max(0, 100 - rate);
+  const rateCls = rate >= 40 ? 'fo-high' : rate >= 20 ? 'fo-mid' : 'fo-low';
+
+  const net20Frgn = fo.net_20d_foreign;
+  const net20Inst = fo.net_20d_inst;
+  const netFrgnCls = net20Frgn > 0 ? 'up' : net20Frgn < 0 ? 'down' : '';
+  const netInstCls = net20Inst > 0 ? 'up' : net20Inst < 0 ? 'down' : '';
+
+  const fmtNet = v => v != null
+    ? (v > 0 ? '+' : '') + Number(v).toLocaleString('ko-KR') + '주'
+    : '-';
+
+  el.innerHTML = `
+    <div class="grid-2" style="margin-top:16px">
+      <div class="card">
+        <div class="card-header">외국인 보유현황 <span class="card-sub">지분율 도넛</span></div>
+        <div class="fo-donut-wrap">
+          <div class="chart-wrap h220" style="flex:1"><canvas id="foreignDonutChart"></canvas></div>
+          <div>
+            <div class="fo-legend-item">
+              <span class="fo-legend-dot" style="background:#2f81f7"></span>
+              외국인 ${rate.toFixed(1)}%
+            </div>
+            <div class="fo-legend-item">
+              <span class="fo-legend-dot" style="background:#e0e4ea"></span>
+              기타(기관+개인) ${other.toFixed(1)}%
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header">외국인 투자 지표</div>
+        <div class="fo-metrics">
+          <div class="fo-metric-item">
+            <div class="fo-metric-label">외국인 지분율</div>
+            <div class="fo-metric-value ${rateCls}">${rate.toFixed(2)}%</div>
+          </div>
+          <div class="fo-metric-item">
+            <div class="fo-metric-label">최근 기간 최고</div>
+            <div class="fo-metric-value">${fo.rate_period_high != null ? fo.rate_period_high.toFixed(2) + '%' : '-'}</div>
+          </div>
+          <div class="fo-metric-item">
+            <div class="fo-metric-label">최근 기간 최저</div>
+            <div class="fo-metric-value">${fo.rate_period_low != null ? fo.rate_period_low.toFixed(2) + '%' : '-'}</div>
+          </div>
+          <div class="fo-metric-item">
+            <div class="fo-metric-label">외국인 보유주식수</div>
+            <div class="fo-metric-value fo-sm">${fo.foreign_shares ? Number(fo.foreign_shares).toLocaleString('ko-KR') + '주' : '-'}</div>
+          </div>
+          <div class="fo-metric-item">
+            <div class="fo-metric-label">20일 외국인 순매수</div>
+            <div class="fo-metric-value ${netFrgnCls}">${fmtNet(net20Frgn)}</div>
+          </div>
+          <div class="fo-metric-item">
+            <div class="fo-metric-label">20일 기관 순매수</div>
+            <div class="fo-metric-value ${netInstCls}">${fmtNet(net20Inst)}</div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+
+  // 도넛 차트
+  destroyChart('foreignDonut');
+  charts.foreignDonut = new Chart(
+    document.getElementById('foreignDonutChart').getContext('2d'),
+    {
+      type: 'doughnut',
+      data: {
+        labels: ['외국인', '기타(기관+개인)'],
+        datasets: [{
+          data: [rate, other],
+          backgroundColor: ['#2f81f7', '#e0e4ea'],
+          borderWidth: 0,
+        }],
+      },
+      options: {
+        ...baseOptions({ scales: {} }),
+        cutout: '65%',
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: ctx => `${ctx.label}: ${ctx.parsed.toFixed(1)}%` } },
+        },
+      },
+    }
+  );
+
+  // 추이 차트
+  const hist = fo.history || [];
+  if (hist.length > 0) {
+    const trendDiv = document.createElement('div');
+    trendDiv.className = 'card';
+    trendDiv.style.marginTop = '16px';
+    trendDiv.innerHTML = `
+      <div class="card-header">외국인 지분율 추이 <span class="card-sub">최근 ${hist.length}일</span></div>
+      <div class="chart-wrap h220"><canvas id="foreignTrendChart"></canvas></div>`;
+    el.appendChild(trendDiv);
+
+    const dates = hist.map(h => h.date).reverse();
+    const rates = hist.map(h => h.foreign_rate).reverse();
+    destroyChart('foreignTrend');
+    charts.foreignTrend = new Chart(
+      document.getElementById('foreignTrendChart').getContext('2d'),
+      {
+        type: 'line',
+        data: {
+          labels: dates,
+          datasets: [{
+            label: '외국인 지분율 (%)',
+            data: rates,
+            borderColor: '#2f81f7',
+            backgroundColor: 'rgba(47,129,247,0.1)',
+            borderWidth: 2, pointRadius: 3, fill: true, tension: 0.2,
+          }],
+        },
+        options: {
+          ...baseOptions(),
+          scales: {
+            x: { grid: { color: '#e0e4ea' }, ticks: { font: { size: 10 }, maxRotation: 45 } },
+            y: { grid: { color: '#e0e4ea' }, ticks: { callback: v => v + '%', font: { size: 11 } } },
+          },
+          plugins: {
+            legend: { display: false },
+            tooltip: { callbacks: { label: ctx => ctx.parsed.y.toFixed(2) + '%' } },
+          },
+        },
+      }
+    );
+  }
+}
+
 /* ── 재무상세 ───────────────────────────────────────────────── */
 function renderFinancials(fin) {
   renderIncomeStatement(fin);
   renderBalanceSheet(fin);
   renderCashFlow(fin);
+  renderTurnover(fin);
 }
 
 function renderIncomeStatement(fin) {
@@ -892,6 +1045,198 @@ function renderCashFlow(fin) {
     return `<tr><td>${label}</td>${cells}</tr>`;
   }).join('');
   document.getElementById('cashflowTable').innerHTML = cfThead + '<tbody>' + cfTbody + '</tbody>';
+}
+
+/* ── 총자산 회전율 분석 ─────────────────────────────────────── */
+function renderTurnover(fin) {
+  const el = document.getElementById('turnoverContent');
+  if (!el) return;
+
+  const at = fin.asset_turnover;
+  if (!at || at.tat == null) {
+    el.innerHTML = `<div class="card" style="padding:32px;text-align:center;color:var(--text-muted)">
+      <div style="font-size:28px;margin-bottom:10px">📊</div>
+      <div>자산회전율 데이터가 없습니다. DART 재무제표 연결 후 조회 바랍니다.</div>
+    </div>`;
+    return;
+  }
+
+  const f2  = v  => v  != null ? v.toFixed(2)  : '-';
+  const f3  = v  => v  != null ? v.toFixed(3)  : '-';
+  const fP  = v  => v  != null ? (v * 100).toFixed(1) + '%' : '-';
+  const sgn = v  => v >= 0 ? '+' : '';
+
+  // ── 1. KPI 카드 ─────────────────────────────────────────────
+  const tat3  = at.tat_3y || [];
+  const tatC  = at.tat;
+  const tatP  = tat3.length >= 2 ? tat3[tat3.length - 2] : null;
+  const yoyD  = tatC != null && tatP ? tatC - tatP : null;
+  const yoyPct= tatP  ? (tatC - tatP) / Math.abs(tatP) * 100 : null;
+  const sAvg  = at.sector_avg;
+  const vsS   = tatC != null && sAvg ? (tatC / sAvg - 1) * 100 : null;
+
+  const kpiHtml = `
+    <div class="tat-kpi-row">
+      <div class="tat-kpi-card main">
+        <div class="tat-kpi-label">총자산 회전율</div>
+        <div class="tat-kpi-value">${f2(tatC)}<span class="tat-kpi-unit">회/년</span></div>
+        <div class="tat-kpi-note">${(at.years || fin.income_statement?.years || []).slice(-1)[0] || ''}년 기준</div>
+      </div>
+      <div class="tat-kpi-card" style="${yoyD != null ? `border-color:${yoyD >= 0 ? 'var(--green)' : 'var(--red)'};background:${yoyD >= 0 ? 'var(--green-dim)' : 'var(--red-dim)'}` : ''}">
+        <div class="tat-kpi-label">전년 대비</div>
+        <div class="tat-kpi-value" style="${yoyD != null ? `color:${yoyD >= 0 ? 'var(--green)' : 'var(--red)'}` : ''}">${yoyD != null ? sgn(yoyD) + yoyD.toFixed(3) : '-'}</div>
+        <div class="tat-kpi-note">${yoyPct != null ? (yoyPct >= 0 ? '▲' : '▼') + Math.abs(yoyPct).toFixed(1) + '%' : '전년도 데이터 없음'}</div>
+      </div>
+      <div class="tat-kpi-card" style="${vsS != null ? `border-color:${vsS >= 0 ? 'var(--green)' : 'var(--red)'};background:${vsS >= 0 ? 'var(--green-dim)' : 'var(--red-dim)'}` : ''}">
+        <div class="tat-kpi-label">업종 평균 대비</div>
+        <div class="tat-kpi-value" style="${vsS != null ? `color:${vsS >= 0 ? 'var(--green)' : 'var(--red)'}` : ''}">${vsS != null ? sgn(vsS) + vsS.toFixed(1) + '%' : '-'}</div>
+        <div class="tat-kpi-note">업종 평균 ${f2(sAvg)}회/년</div>
+      </div>
+    </div>`;
+
+  // ── 2. 추이 차트 + 세부 회전율 테이블 ──────────────────────
+  const chartCard = `
+    <div class="card">
+      <div class="card-header">📈 총자산 회전율 3개년 추이
+        <span class="card-sub">업종 평균 포함</span>
+      </div>
+      <div class="chart-wrap h240"><canvas id="turnoverTrendChart"></canvas></div>
+    </div>`;
+
+  const MAX_SCALE = 15;
+  const detailItems = [
+    { label: '총자산 회전율',    formula: '매출 ÷ 총자산',    val: at.tat,  main: true  },
+    { label: '유동자산 회전율',  formula: '매출 ÷ 유동자산',  val: at.cat                },
+    { label: '비유동자산 회전율',formula: '매출 ÷ 비유동자산',val: at.ncat               },
+    { label: '영업자산 회전율',  formula: '매출 ÷ 영업자산',  val: at.oat                },
+    { label: '재고자산 회전율',  formula: '매출 ÷ 재고자산',  val: at.invt               },
+    { label: '매출채권 회전율',  formula: '매출 ÷ 매출채권',  val: at.art                },
+  ];
+  const detailRows = detailItems.map(r => {
+    const v = r.val;
+    const barW = v != null ? Math.min(v / MAX_SCALE * 100, 100).toFixed(1) : 0;
+    const bar = v != null
+      ? `<div class="tat-bar-track"><div class="tat-bar-fill${r.main ? ' main' : ''}" style="width:${barW}%"></div></div>`
+      : '';
+    return `<tr class="${r.main ? 'tat-main-row' : ''}">
+      <td><strong>${r.label}</strong></td>
+      <td class="tat-formula">${r.formula}</td>
+      <td class="tat-val">${v != null ? f2(v) + ' 회' : '-'}</td>
+      <td class="tat-bar-cell">${bar}</td>
+    </tr>`;
+  }).join('');
+  const detailHtml = `
+    <div class="card">
+      <div class="card-header">🔍 세부 회전율 분석</div>
+      <div class="comp-table-wrap">
+        <table class="tat-table">
+          <thead><tr><th>지표</th><th>산식</th><th>값</th><th>상대 크기 (최대 ${MAX_SCALE}회 기준)</th></tr></thead>
+          <tbody>${detailRows}</tbody>
+        </table>
+      </div>
+    </div>`;
+
+  // ── 3. DuPont 분석 ──────────────────────────────────────────
+  const npm = at.npm;
+  const tat = at.tat;
+  const fl  = at.fl;
+  const roeCalc = npm != null && tat != null && fl != null
+    ? (npm * tat * fl * 100).toFixed(1) : null;
+  const roeAct = (fin.income_statement?.roe || []).filter(v => v != null).slice(-1)[0];
+
+  // ROE 주도 요인: 각 요소를 베이스라인 대비 비율로 비교
+  let dominant = null;
+  if (npm != null && tat != null && fl != null) {
+    const scores = {
+      npm: Math.abs(npm) / 0.06,
+      tat: Math.abs(tat) / 0.55,
+      fl:  Math.abs(fl)  / 2.0,
+    };
+    dominant = Object.entries(scores).sort((a, b) => b[1] - a[1])[0][0];
+  }
+  const factorMeta = {
+    npm: { name: '수익성',   desc: '순이익률이 높아 적은 매출에서도 큰 이익을 냅니다.' },
+    tat: { name: '효율성',   desc: '자산 활용도가 높아 같은 자산으로 더 많은 매출을 창출합니다.' },
+    fl:  { name: '레버리지', desc: '부채를 적극 활용해 자기자본 수익률을 높이고 있습니다.' },
+  };
+
+  const dupFactor = (label, val, unit, isDominant, isResult) => `
+    <div class="dupont-factor${isDominant ? ' dominant' : ''}${isResult ? ' result' : ''}">
+      <div class="dupont-factor-name">${label}</div>
+      <div class="dupont-factor-val">${val != null ? val : '-'}${val != null ? `<small>${unit}</small>` : ''}</div>
+    </div>`;
+
+  const dupHtml = `
+    <div class="card">
+      <div class="card-header">⚗️ DuPont 분석
+        <span class="card-sub">ROE = 순이익률 × 총자산 회전율 × 재무레버리지</span>
+      </div>
+      <div class="dupont-equation">
+        ${dupFactor('순이익률',     npm != null ? (npm*100).toFixed(1) : null, '%',    dominant==='npm', false)}
+        <div class="dupont-op">×</div>
+        ${dupFactor('총자산 회전율', tat != null ? f2(tat) : null,             '회',   dominant==='tat', false)}
+        <div class="dupont-op">×</div>
+        ${dupFactor('재무레버리지',  fl  != null ? f2(fl)  : null,             '배',   dominant==='fl',  false)}
+        <div class="dupont-op">=</div>
+        ${dupFactor('ROE (추산)',   roeCalc,                                    '%',   false,            true)}
+      </div>
+      ${roeAct != null ? `<div class="dupont-actual">실제 ROE: <strong>${roeAct}%</strong> · 추산 ROE: ${roeCalc != null ? roeCalc + '%' : '-'}</div>` : ''}
+      ${dominant ? `<div class="dupont-insight">💡 ROE 주도 요인: <strong>${factorMeta[dominant].name}</strong> — ${factorMeta[dominant].desc}</div>` : ''}
+    </div>`;
+
+  // ── 4. AI 평가 ──────────────────────────────────────────────
+  const aiHtml = at.ai_comment ? `
+    <div class="card tat-ai-card">
+      <div class="card-header">🤖 AI 자산 활용 평가</div>
+      <div class="tat-ai-comment">${at.ai_comment}</div>
+    </div>` : '';
+
+  el.innerHTML = kpiHtml + chartCard + detailHtml + dupHtml + aiHtml;
+
+  // Chart.js 차트 그리기
+  const years3 = (at.years || []).slice(-3);
+  const tat3v  = tat3.slice(-3);
+  destroyChart('turnoverTrend');
+  charts.turnoverTrend = new Chart(
+    document.getElementById('turnoverTrendChart').getContext('2d'),
+    {
+      type: 'line',
+      data: {
+        labels: years3,
+        datasets: [
+          {
+            label: '총자산 회전율',
+            data: tat3v,
+            borderColor: '#2f81f7', backgroundColor: '#2f81f718',
+            borderWidth: 2.5, pointRadius: 5, pointBackgroundColor: '#2f81f7',
+            tension: 0.35, fill: true,
+          },
+          sAvg != null ? {
+            label: `업종 평균 (${f2(sAvg)}회)`,
+            data: years3.map(() => sAvg),
+            borderColor: '#d29922', borderWidth: 1.5,
+            borderDash: [6, 4], pointRadius: 0, tension: 0,
+          } : null,
+        ].filter(Boolean),
+      },
+      options: {
+        ...baseOptions(),
+        scales: {
+          x: { grid: { color: '#e0e4ea' } },
+          y: {
+            grid: { color: '#e0e4ea' },
+            ticks: { callback: v => f2(v) + '회' },
+            suggestedMin: 0,
+          },
+        },
+        plugins: {
+          tooltip: { callbacks: {
+            label: ctx => `${ctx.dataset.label}: ${(ctx.parsed.y ?? 0).toFixed(3)}회/년`,
+          }},
+        },
+      },
+    }
+  );
 }
 
 /* ── 시설투자 ──────────────────────────────────────────────── */
@@ -1466,6 +1811,151 @@ function renderHR(hr) {
   document.getElementById('hrTable').innerHTML = tHead + '<tbody>' + tBody + '</tbody>';
 }
 
+/* ── 경쟁사 직접 추가 UI ─────────────────────────────────── */
+function initCompetitorsUI(code, initialRows) {
+  renderCompSearchBar(code);
+  renderCompetitors(initialRows);
+}
+
+function renderCompSearchBar(code) {
+  const bar = document.getElementById('compSearchBar');
+  if (!bar) return;
+  bar.innerHTML = `
+    <div class="comp-add-panel">
+      <div class="comp-add-header">
+        <span class="comp-add-title">경쟁사 직접 추가</span>
+        <span class="comp-add-count" id="compAddCount">${customCompetitors.length}/5</span>
+      </div>
+      <div class="comp-add-row">
+        <div class="comp-search-wrap">
+          <input id="compSearchInput" class="comp-search-input"
+            placeholder="기업명 또는 종목코드 검색…"
+            autocomplete="off"
+            oninput="onCompSearch(this.value)"
+            onkeydown="onCompSearchKey(event)" />
+          <div id="compSearchDropdown" class="comp-search-dropdown hidden"></div>
+        </div>
+        <button class="comp-btn-ai" onclick="recommendCompetitors('${code}')">
+          ✨ AI 추천
+        </button>
+      </div>
+      <div id="compChips" class="comp-chips"></div>
+    </div>`;
+  renderCompChips(code);
+}
+
+function renderCompChips(code) {
+  const el = document.getElementById('compChips');
+  const countEl = document.getElementById('compAddCount');
+  if (!el) return;
+  if (countEl) countEl.textContent = `${customCompetitors.length}/5`;
+  if (customCompetitors.length === 0) {
+    el.innerHTML = '';
+    return;
+  }
+  el.innerHTML = customCompetitors.map(c => `
+    <span class="comp-chip">
+      ${c.name} <span class="comp-chip-code">${c.code}</span>
+      <button class="comp-chip-x" data-remove="${c.code}" title="제거">×</button>
+    </span>`).join('');
+  el.querySelectorAll('.comp-chip-x').forEach(btn => {
+    btn.addEventListener('click', () => removeCustomCompetitor(code, btn.dataset.remove));
+  });
+}
+
+function onCompSearch(q) {
+  clearTimeout(compSearchTimer);
+  const dd = document.getElementById('compSearchDropdown');
+  if (!q.trim()) { dd.classList.add('hidden'); dd.innerHTML = ''; return; }
+  compSearchTimer = setTimeout(async () => {
+    const res = await fetch(`/api/search?q=${encodeURIComponent(q.trim())}`);
+    const results = await res.json();
+    if (!results.length) { dd.classList.add('hidden'); dd.innerHTML = ''; return; }
+    const addedCodes = new Set([currentCode, ...customCompetitors.map(c => c.code)]);
+    const filtered = results.filter(r => !addedCodes.has(r.code));
+    if (!filtered.length) { dd.classList.add('hidden'); dd.innerHTML = ''; return; }
+    // data-* 속성으로 코드·이름 전달해 인라인 이스케이프 문제 방지
+    dd.innerHTML = filtered.map(r => `
+      <div class="comp-dd-item" data-code="${r.code}" data-name="${r.name.replace(/"/g,'&quot;')}">
+        <span class="comp-dd-name">${r.name}</span>
+        <span class="comp-dd-code">${r.code} · ${r.sector}</span>
+      </div>`).join('');
+    dd.querySelectorAll('.comp-dd-item').forEach(el => {
+      el.addEventListener('click', () => addCustomCompetitor(el.dataset.code, el.dataset.name));
+    });
+    dd.classList.remove('hidden');
+  }, 250);
+}
+
+function onCompSearchKey(e) {
+  if (e.key === 'Escape') {
+    document.getElementById('compSearchDropdown').classList.add('hidden');
+  }
+}
+
+async function addCustomCompetitor(code, name) {
+  if (customCompetitors.length >= 5) {
+    alert('최대 5개까지 추가할 수 있습니다.');
+    return;
+  }
+  if (customCompetitors.some(c => c.code === code) || code === currentCode) return;
+  customCompetitors.push({ code, name });
+  const dd = document.getElementById('compSearchDropdown');
+  if (dd) { dd.classList.add('hidden'); dd.innerHTML = ''; }
+  const inp = document.getElementById('compSearchInput');
+  if (inp) inp.value = '';
+  renderCompChips(currentCode);
+  await refreshCompetitors();
+}
+
+async function removeCustomCompetitor(mainCode, removeCode) {
+  customCompetitors = customCompetitors.filter(c => c.code !== removeCode);
+  renderCompChips(mainCode);
+  await refreshCompetitors();
+}
+
+async function refreshCompetitors() {
+  const tableEl = document.getElementById('competitorTable');
+  if (tableEl) {
+    tableEl.innerHTML = '<div style="padding:16px;color:var(--text-muted);text-align:center">⏳ 데이터 갱신 중…</div>';
+  }
+  const extra = customCompetitors.map(c => c.code).join(',');
+  const url   = extra
+    ? `/api/competitors/${currentCode}?extra=${extra}`
+    : `/api/competitors/${currentCode}`;
+  const rows  = await fetch(url).then(r => r.json());
+  renderCompetitors(rows);
+}
+
+async function recommendCompetitors(code) {
+  const btn = document.querySelector('.comp-btn-ai');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ 추천 중…'; }
+  try {
+    const peers = await fetch(`/api/peers/${code}`).then(r => r.json());
+    const addedCodes = new Set([currentCode, ...customCompetitors.map(c => c.code)]);
+    let added = 0;
+    for (const p of peers) {
+      if (added >= 3) break;
+      if (addedCodes.has(p.code) || customCompetitors.length >= 5) continue;
+      customCompetitors.push({ code: p.code, name: p.name });
+      addedCodes.add(p.code);
+      added++;
+    }
+    renderCompChips(code);
+    if (added > 0) await refreshCompetitors();
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '✨ AI 추천'; }
+  }
+}
+
+// 경쟁사 검색 외부 클릭 시 드롭다운 닫기
+document.addEventListener('mousedown', e => {
+  if (!e.target.closest('.comp-search-wrap')) {
+    const dd = document.getElementById('compSearchDropdown');
+    if (dd) dd.classList.add('hidden');
+  }
+});
+
 /* ── 경쟁사 비교 ────────────────────────────────────────────── */
 function renderCompetitors(rows) {
   // 시총 내림차순 정렬 (전체)
@@ -1483,6 +1973,7 @@ function renderCompetitors(rows) {
     <th>ROE</th>
     <th>PER</th>
     <th>PBR</th>
+    <th>외국인%</th>
   </tr></thead>`;
 
   const tbody = rows.map(r => {
@@ -1495,7 +1986,12 @@ function renderCompetitors(rows) {
     const roe  = r.roe        != null ? r.roe.toFixed(1) + '%' : '-';
     const per  = r.per        != null ? fmtRatio(r.per)        : '-';
     const pbr  = r.pbr        != null ? fmtRatio(r.pbr)        : '-';
-    const mcap = r.market_cap          ? fmtMcap(r.market_cap) : '-';
+    const mcap = r.market_cap ? fmtMcap(r.market_cap) : '-';
+    const fr   = r.foreign_rate;
+    const frCls = fr == null ? '' : fr >= 40 ? 'fo-high' : fr >= 20 ? 'fo-mid' : 'fo-low';
+    const frHtml = fr != null
+      ? `<span class="fo-rate-badge ${frCls}">${fr.toFixed(1)}%</span>`
+      : '-';
     return `
       <tr class="${r.is_main ? 'main-row' : ''}">
         <td>
@@ -1511,6 +2007,7 @@ function renderCompetitors(rows) {
         <td>${roe}</td>
         <td>${per}</td>
         <td>${pbr}</td>
+        <td style="text-align:center">${frHtml}</td>
       </tr>`;
   }).join('');
 
@@ -1650,6 +2147,63 @@ function renderCompetitors(rows) {
       },
     }
   );
+
+  // ── 외국인 지분율 비교 차트 ────────────────────────────────
+  const frRows = rows.filter(r => r.foreign_rate != null);
+  const frCard = document.getElementById('compForeignCard');
+  if (frRows.length > 0 && frCard) {
+    frCard.style.display = '';
+    destroyChart('compForeign');
+    charts.compForeign = new Chart(
+      document.getElementById('compForeignChart').getContext('2d'),
+      {
+        type: 'bar',
+        data: {
+          labels: frRows.map(r => r.name),
+          datasets: [{
+            label: '외국인 지분율 (%)',
+            data:  frRows.map(r => r.foreign_rate),
+            backgroundColor: frRows.map(r => {
+              const v = r.foreign_rate;
+              const base = r.is_main ? 1 : 0.4;
+              if (v >= 40) return `rgba(26,127,55,${base})`;
+              if (v >= 20) return `rgba(47,129,247,${base})`;
+              return `rgba(99,108,118,${base})`;
+            }),
+            borderColor: frRows.map(r => {
+              const v = r.foreign_rate;
+              if (v >= 40) return '#1a7f37';
+              if (v >= 20) return '#2f81f7';
+              return '#636c76';
+            }),
+            borderWidth: 1.5, borderRadius: 4,
+          }],
+        },
+        options: {
+          ...baseOptions({ indexAxis: 'y' }),
+          plugins: {
+            legend: { display: false },
+            tooltip: { callbacks: { label: ctx => `${ctx.parsed.x.toFixed(2)}%` } },
+          },
+          scales: {
+            x: {
+              grid: { color: '#e0e4ea' },
+              ticks: { callback: v => v + '%' },
+              max: Math.min(100, Math.ceil(Math.max(...frRows.map(r => r.foreign_rate)) / 5) * 5 + 5),
+            },
+            y: {
+              grid: { color: '#e0e4ea' },
+              ticks: { maxRotation: 0 },
+              afterFit: axis => { axis.width = Math.max(axis.width, 90); },
+            },
+          },
+          layout: { padding: { left: 8, right: 8 } },
+        },
+      }
+    );
+  } else if (frCard) {
+    frCard.style.display = 'none';
+  }
 }
 
 /* ── 애널리스트 컨센서스 ────────────────────────────────────── */
@@ -2713,98 +3267,15 @@ function renderSector(data) {
     </div>`;
   }
 
-  /* ── 6. 한경 컨센서스 ── */
-  const con = data.consensus || {};
-  if (con.opinion || (con.reports && con.reports.length > 0)) {
-    const opinionColor = {
-      '강력매수': 'var(--red)', '매수': '#0969da',
-      '보유': 'var(--yellow)', '매도': 'var(--text-muted)', '강력매도': 'var(--red)',
-    }[con.opinion] || 'var(--text-muted)';
-    const opinionBg = {
-      '강력매수': 'var(--red-dim)', '매수': 'var(--blue-dim)',
-      '보유': 'var(--yellow-dim)', '매도': 'var(--bg-hover)', '강력매도': 'var(--red-dim)',
-    }[con.opinion] || 'var(--bg-hover)';
-
-    // 목표가 vs 현재가 바
-    let priceBarHtml = '';
-    if (con.cur_price && con.target_price) {
-      const cur = con.cur_price, tgt = con.target_price;
-      const max = Math.max(cur, tgt) * 1.05;
-      const curPct  = (cur / max * 100).toFixed(1);
-      const tgtPct  = (tgt / max * 100).toFixed(1);
-      const upsideStr = con.upside != null
-        ? `<span style="color:${con.upside >= 0 ? 'var(--green)' : 'var(--red)'}; font-weight:700">
-             ${con.upside >= 0 ? '▲' : '▼'} ${Math.abs(con.upside)}%
-           </span>`
-        : '';
-      priceBarHtml = `
-        <div class="con-price-wrap">
-          <div class="con-price-row">
-            <span class="con-price-label">현재가</span>
-            <div class="con-price-track">
-              <div class="con-price-fill cur" style="width:${curPct}%"></div>
-            </div>
-            <span class="con-price-val">${cur.toLocaleString('ko-KR')}원</span>
-          </div>
-          <div class="con-price-row">
-            <span class="con-price-label">목표주가</span>
-            <div class="con-price-track">
-              <div class="con-price-fill tgt" style="width:${tgtPct}%"></div>
-            </div>
-            <span class="con-price-val">${tgt.toLocaleString('ko-KR')}원 ${upsideStr}</span>
-          </div>
-        </div>`;
-    }
-
-    // 지표 그리드
-    const metricItems = [
-      con.opinion     ? { label: '투자의견', val: `<span style="color:${opinionColor};font-weight:700">${con.opinion}</span>` } : null,
-      con.per         ? { label: 'PER',      val: con.per + '배' } : null,
-      con.eps         ? { label: 'EPS',      val: con.eps.toLocaleString('ko-KR') + '원' } : null,
-      con.exp_eps     ? { label: '예상EPS',  val: con.exp_eps.toLocaleString('ko-KR') + '원' } : null,
-    ].filter(Boolean);
-
-    const metricsHtml = metricItems.map(m => `
-      <div class="con-metric">
-        <div class="con-metric-label">${m.label}</div>
-        <div class="con-metric-val">${m.val}</div>
-      </div>`).join('');
-
-    // 최신 리포트 목록
-    const reportRows = (con.reports || []).map(rp => `
-      <div class="con-report-row">
-        <span class="con-report-brokerage">${rp.brokerage}</span>
-        <span class="con-report-analyst">${rp.analyst}</span>
-        <span class="con-report-date">${rp.date}</span>
-        <span class="con-report-title">${rp.title}</span>
-      </div>`).join('');
-
-    html += `
-      <div class="card">
-        <div class="card-header">📊 한경 컨센서스
-          <span class="src-badge realtime" style="display:inline-block;margin-left:8px">한국경제</span>
-        </div>
-        ${priceBarHtml}
-        ${metricsHtml ? `<div class="con-metrics">${metricsHtml}</div>` : ''}
-        ${reportRows ? `
-          <div class="con-reports">
-            <div class="con-reports-title">최근 리포트</div>
-            ${reportRows}
-          </div>` : ''}
-      </div>`;
-  }
-
-  /* ── 7. 관련 뉴스 (한국 / 해외 / 한경 탭) ── */
+  /* ── 6. 관련 뉴스 (한국 / 해외 탭) ── */
   const news        = data.news         || [];
   const newsForeign = data.news_foreign || [];
-  const newsHk      = data.news_hankyung || [];
   const hasKr = news.length > 0;
   const hasEn = newsForeign.length > 0;
-  const hasHk = newsHk.length > 0;
 
   function newsItemHtml(n, lang) {
-    const cls = lang === 'en' ? ' en' : lang === 'hk' ? ' hk' : '';
-    const flag = lang === 'en' ? '🌐 ' : lang === 'hk' ? '📰 ' : '';
+    const cls = lang === 'en' ? ' en' : '';
+    const flag = lang === 'en' ? '🌐 ' : '';
     return `
       <a class="news-item" href="${n.url}" target="_blank" rel="noopener">
         <div class="news-meta">
@@ -2816,9 +3287,8 @@ function renderSector(data) {
       </a>`;
   }
 
-  if (hasKr || hasEn || hasHk) {
-    // 첫 번째 활성 탭 결정
-    const firstLang = hasKr ? 'kr' : hasHk ? 'hk' : 'en';
+  if (hasKr || hasEn) {
+    const firstLang = hasKr ? 'kr' : 'en';
     const tabId = `newsTab_${data.code}`;
     html += `<div class="card">
       <div class="card-header">📰 관련 뉴스</div>
@@ -2826,18 +3296,12 @@ function renderSector(data) {
         ${hasKr ? `<button class="news-tab-btn${firstLang==='kr'?' active':''}" data-lang="kr"
           onclick="switchNewsTab('${tabId}','kr')">
           🇰🇷 한국 <span class="news-tab-cnt">${news.length}</span></button>` : ''}
-        ${hasHk ? `<button class="news-tab-btn${firstLang==='hk'?' active':''}" data-lang="hk"
-          onclick="switchNewsTab('${tabId}','hk')">
-          📰 한경 <span class="news-tab-cnt">${newsHk.length}</span></button>` : ''}
         ${hasEn ? `<button class="news-tab-btn${firstLang==='en'?' active':''}" data-lang="en"
           onclick="switchNewsTab('${tabId}','en')">
           🌐 해외 <span class="news-tab-cnt">${newsForeign.length}</span></button>` : ''}
       </div>
       <div class="news-pane" data-lang="kr" style="${firstLang==='kr'?'':'display:none'}">
         <div class="news-list">${news.map(n => newsItemHtml(n,'kr')).join('')}</div>
-      </div>
-      <div class="news-pane" data-lang="hk" style="${firstLang==='hk'?'':'display:none'}">
-        <div class="news-list">${newsHk.map(n => newsItemHtml(n,'hk')).join('')}</div>
       </div>
       <div class="news-pane" data-lang="en" style="${firstLang==='en'?'':'display:none'}">
         <div class="news-list">${newsForeign.map(n => newsItemHtml(n,'en')).join('')}</div>

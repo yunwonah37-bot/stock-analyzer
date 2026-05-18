@@ -267,6 +267,8 @@ canvas { display: block; }
 
 /* ── 차트 래퍼 ──────────────────────────────────────────────── */
 .chart-wrap         { position: relative; height: 280px; }
+.chart-wrap.h180    { height: 180px; }
+.chart-wrap.h220    { height: 220px; }
 .chart-wrap.h250    { height: 250px; }
 .chart-wrap.h260    { height: 260px; }
 
@@ -396,6 +398,121 @@ canvas { display: block; }
   margin-bottom: 10px; display: flex; align-items: center; gap: 4px;
   flex-wrap: wrap;
 }
+
+/* ── 총자산 회전율 분석 ─────────────────────────────────────────── */
+.tat-kpi-row { display: flex; gap: 14px; margin-bottom: 14px; flex-wrap: wrap; }
+.tat-kpi-card {
+  flex: 1; min-width: 140px;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 10px; padding: 18px 20px;
+}
+.tat-kpi-card.main { border-color: var(--blue); background: var(--blue-dim); }
+.tat-kpi-label { font-size: 12px; color: var(--text-muted); margin-bottom: 6px; font-weight: 500; }
+.tat-kpi-value { font-size: 26px; font-weight: 700; color: var(--text); line-height: 1.1; }
+.tat-kpi-unit  { font-size: 13px; font-weight: 400; color: var(--text-muted); margin-left: 3px; }
+.tat-kpi-note  { font-size: 11.5px; color: var(--text-muted); margin-top: 5px; }
+
+.tat-table { width: 100%; border-collapse: collapse; }
+.tat-table th {
+  padding: 9px 12px; font-size: 12px; color: var(--text-muted);
+  background: var(--bg); border-bottom: 1px solid var(--border); text-align: left; font-weight: 500;
+}
+.tat-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); font-size: 13px; vertical-align: middle; }
+.tat-table tr:last-child td { border-bottom: none; }
+.tat-main-row td { background: var(--blue-dim); }
+.tat-formula { font-size: 11.5px; color: var(--text-muted); }
+.tat-val { text-align: right; font-weight: 600; white-space: nowrap; min-width: 70px; }
+.tat-bar-cell { width: 160px; }
+.tat-bar-track { background: var(--bg-hover); border-radius: 4px; height: 7px; }
+.tat-bar-fill { background: #2f81f750; border-radius: 4px; height: 7px; transition: width .4s; }
+.tat-bar-fill.main { background: #2f81f7; }
+
+/* DuPont */
+.dupont-equation {
+  display: flex; align-items: stretch; gap: 10px;
+  padding: 20px 16px 8px; flex-wrap: wrap;
+}
+.dupont-factor {
+  flex: 1; min-width: 90px;
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 10px; padding: 14px 12px; text-align: center;
+}
+.dupont-factor.dominant { border-color: var(--blue); background: var(--blue-dim); }
+.dupont-factor.result   { border-color: var(--green); background: var(--green-dim); }
+.dupont-factor-name { font-size: 11px; color: var(--text-muted); margin-bottom: 8px; font-weight: 500; }
+.dupont-factor-val  { font-size: 22px; font-weight: 700; color: var(--text); line-height: 1; }
+.dupont-factor-val small { font-size: 12px; font-weight: 400; color: var(--text-muted); margin-left: 2px; }
+.dupont-op { font-size: 24px; color: var(--text-muted); font-weight: 300; align-self: center; flex-shrink: 0; padding: 0 2px; }
+.dupont-actual {
+  padding: 10px 16px; font-size: 13px; color: var(--text-muted);
+  border-top: 1px solid var(--border); background: var(--bg);
+}
+.dupont-insight {
+  padding: 12px 16px; font-size: 13px; color: var(--text);
+  border-top: 1px solid var(--border); line-height: 1.6;
+}
+
+/* AI 평가 */
+.tat-ai-card .card-header { border-bottom: 1px solid var(--border); }
+.tat-ai-comment {
+  padding: 16px 18px; font-size: 14px; line-height: 1.75; color: var(--text);
+}
+
+/* ── 경쟁사 직접 추가 UI ───────────────────────────────────────── */
+.comp-add-panel {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 10px; padding: 16px 20px; margin-bottom: 14px;
+}
+.comp-add-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 10px;
+}
+.comp-add-title  { font-size: 13px; font-weight: 600; color: var(--text); }
+.comp-add-count  { font-size: 12px; color: var(--text-muted); background: var(--bg); padding: 2px 8px; border-radius: 10px; border: 1px solid var(--border); }
+.comp-add-row    { display: flex; gap: 8px; align-items: center; }
+.comp-search-wrap { position: relative; flex: 1; }
+.comp-search-input {
+  width: 100%; padding: 8px 12px; border: 1px solid var(--border);
+  border-radius: 7px; background: var(--bg); color: var(--text);
+  font-size: 13px; font-family: inherit; box-sizing: border-box;
+  outline: none;
+}
+.comp-search-input:focus { border-color: var(--blue); }
+.comp-search-dropdown {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.15);
+  z-index: 200; overflow: hidden;
+}
+.comp-search-dropdown.hidden { display: none; }
+.comp-dd-item {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 9px 14px; cursor: pointer; transition: background .15s;
+}
+.comp-dd-item:hover { background: var(--bg-hover); }
+.comp-dd-name { font-size: 13.5px; font-weight: 500; color: var(--text); }
+.comp-dd-code { font-size: 11px; color: var(--text-muted); }
+.comp-btn-ai {
+  padding: 8px 14px; background: linear-gradient(135deg, #2f81f7, #7c3aed);
+  color: #fff; border: none; border-radius: 7px; font-size: 13px;
+  font-family: inherit; font-weight: 500; cursor: pointer; white-space: nowrap;
+  transition: opacity .15s;
+}
+.comp-btn-ai:hover   { opacity: .88; }
+.comp-btn-ai:disabled { opacity: .5; cursor: default; }
+.comp-chips { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
+.comp-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: var(--blue-dim); border: 1px solid #2f81f744;
+  border-radius: 20px; padding: 4px 10px 4px 12px;
+  font-size: 12.5px; color: var(--blue); font-weight: 500;
+}
+.comp-chip-code { font-size: 10.5px; color: var(--text-muted); }
+.comp-chip-x {
+  background: none; border: none; cursor: pointer; color: var(--text-muted);
+  font-size: 15px; line-height: 1; padding: 0 2px; transition: color .15s;
+}
+.comp-chip-x:hover { color: var(--red); }
 
 /* ── R&D ─────────────────────────────────────────────────────── */
 .rnd-nodata {
@@ -973,6 +1090,42 @@ canvas { display: block; }
 .analyst-report-link { color: var(--blue); text-decoration: none; font-weight: 500; }
 .analyst-report-link:hover { text-decoration: underline; }
 
+/* ── 외국인 지분율 ──────────────────────────────────────────── */
+.fo-rate-badge {
+  display: inline-block;
+  padding: 1px 7px; border-radius: 10px;
+  font-size: 12px; font-weight: 600;
+}
+.fo-rate-badge.fo-high { background: var(--green-dim); color: var(--green); }
+.fo-rate-badge.fo-mid  { background: var(--blue-dim);  color: var(--blue);  }
+.fo-rate-badge.fo-low  { background: var(--bg-hover);  color: var(--text-muted); }
+
+.fo-donut-wrap {
+  display: flex; align-items: center; gap: 20px; padding: 8px 0;
+}
+.fo-legend-item {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 12.5px; color: var(--text-muted); margin-bottom: 6px;
+}
+.fo-legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+
+.fo-metrics {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 12px; padding: 4px 0;
+}
+.fo-metric-item {
+  background: var(--bg-card); border-radius: var(--radius-sm);
+  padding: 12px 14px; border: 1px solid var(--border);
+}
+.fo-metric-label { font-size: 11px; color: var(--text-muted); margin-bottom: 4px; }
+.fo-metric-value { font-size: 20px; font-weight: 700; }
+.fo-metric-value.fo-high { color: var(--green); }
+.fo-metric-value.fo-mid  { color: var(--blue);  }
+.fo-metric-value.fo-low  { color: var(--text-muted); }
+.fo-metric-value.fo-sm   { font-size: 13px; }
+.fo-metric-value.up      { color: var(--red); }
+.fo-metric-value.down    { color: var(--blue); }
+
 /* ── 유틸 ──────────────────────────────────────────────────── */
 .up    { color: var(--red); }
 .down  { color: var(--blue); }
@@ -1066,6 +1219,8 @@ canvas { display: block; }
 
   /* 차트 높이 축소 */
   .chart-wrap       { height: 210px; }
+  .chart-wrap.h180  { height: 150px; }
+  .chart-wrap.h220  { height: 180px; }
   .chart-wrap.h250  { height: 190px; }
   .chart-wrap.h260  { height: 190px; }
   .chart-wrap.h280  { height: 210px; }
@@ -1131,4 +1286,9 @@ canvas { display: block; }
   .psr-body        { flex-direction: column; gap: 16px; }
   .psr-left, .psr-right { width: 100%; }
   .psr-main-val    { font-size: 28px; }
+
+  /* 외국인 지분율 */
+  .fo-metrics      { grid-template-columns: repeat(2, 1fr); }
+  .fo-donut-wrap   { flex-direction: column; }
+  .fo-metric-value { font-size: 18px; }
 }

@@ -549,6 +549,8 @@ def _fetch_naver_price(code):
         except:
             recomm_mean = None
 
+        foreign_rate = _parse_naver_ratio(infos.get("외인소진율", ""), "%")
+
         return {"current_price": cur, "prev_price": prev,
                 "change": chg_amt, "change_pct": chg_pct,
                 "w52_high": hi52, "w52_low": lo52,
@@ -558,7 +560,8 @@ def _fetch_naver_price(code):
                 "bps": int(bps) if bps is not None else None,
                 "dividend_yield": div,
                 "consensus_target": consensus_tgt,
-                "recomm_mean":      recomm_mean}
+                "recomm_mean":      recomm_mean,
+                "foreign_rate":     foreign_rate}
     except Exception as e:
         app.logger.warning(f"Naver Finance 실패 ({code}): {e}")
         return None
@@ -639,6 +642,114 @@ def _fetch_naver_html_price(code):
     except Exception as e:
         app.logger.warning(f"Naver HTML 파싱 실패 ({code}): {e}")
         return None
+
+
+_foreign_cache: dict = {}
+_FOREIGN_TTL = 300  # 5분 캐시
+
+def _fetch_foreign_ownership(code: str) -> dict:
+    """Naver Finance에서 외국인 보유현황 + 최근 20일 순매매 추이를 스크래핑."""
+    now    = datetime.now()
+    cached = _foreign_cache.get(code)
+    if cached and (now - cached["ts"]).total_seconds() < _FOREIGN_TTL:
+        return cached["data"]
+    try:
+        hdr  = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                               "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120"}
+
+        # ── 1. main.naver 에서 외국인 보유주식수 ─────────────────
+        main_url = f"https://finance.naver.com/item/main.naver?code={code}"
+        soup = BeautifulSoup(
+            requests.get(main_url, headers=hdr, timeout=8).text, "html.parser")
+
+        tables = soup.find_all("table")
+        foreign_limit = 0
+        foreign_shares = 0
+        foreign_rate_html = None
+
+        for tbl in tables:
+            summary = tbl.get("summary", "")
+            if "외국인한도" in summary:
+                rows = tbl.find_all("tr")
+                for row in rows:
+                    th = row.find("th")
+                    td = row.find("td")
+                    if not th or not td:
+                        continue
+                    label = th.get_text(strip=True)
+                    val   = td.get_text(strip=True).replace(",", "")
+                    if "한도주식수(A)" in label:
+                        try: foreign_limit = int(re.sub(r'\D', '', val))
+                        except: pass
+                    elif "보유주식수(B)" in label:
+                        try: foreign_shares = int(re.sub(r'\D', '', val))
+                        except: pass
+                    elif "소진율" in label:
+                        m = re.search(r'[\d.]+', val)
+                        if m: foreign_rate_html = float(m.group())
+                break
+
+        # ── 2. frgn.naver 에서 최근 20일 외국인·기관 순매매 ──────
+        frgn_url = f"https://finance.naver.com/item/frgn.naver?code={code}"
+        fsoup = BeautifulSoup(
+            requests.get(frgn_url, headers=hdr, timeout=8).text, "html.parser")
+
+        history = []
+        # frgn 페이지의 외국인 기관 순매매 테이블 (summary 속성으로 식별)
+        frgn_tbl = None
+        for tbl in fsoup.find_all("table"):
+            s = tbl.get("summary", "")
+            if "외국인" in s and "기관" in s and "순매매" in s:
+                frgn_tbl = tbl
+                break
+
+        if frgn_tbl:
+            for row in frgn_tbl.find_all("tr")[2:22]:  # 최대 20행
+                cols = [td.get_text(strip=True) for td in row.find_all(["td", "th"])]
+                if len(cols) < 9 or not cols[0]:
+                    continue
+                date_str  = cols[0]
+                try:
+                    price_val = int(cols[1].replace(",", ""))
+                    inst_net  = int(re.sub(r'[^\d\-]', '', cols[5]) or 0)
+                    frgn_net  = int(re.sub(r'[^\d\-]', '', cols[6]) or 0)
+                    frgn_sh   = int(re.sub(r'[^\d\-]', '', cols[7]) or 0)
+                    rate_m    = re.search(r'[\d.]+', cols[8])
+                    rate_v    = float(rate_m.group()) if rate_m else None
+                    history.append({
+                        "date":         date_str,
+                        "price":        price_val,
+                        "inst_net":     inst_net,
+                        "foreign_net":  frgn_net,
+                        "foreign_sh":   frgn_sh,
+                        "foreign_rate": rate_v,
+                    })
+                except (ValueError, IndexError):
+                    continue
+
+        # ── 3. 집계 ──────────────────────────────────────────────
+        recent20  = history[:20]
+        net_frgn  = sum(h["foreign_net"] for h in recent20 if h["foreign_net"])
+        net_inst  = sum(h["inst_net"]    for h in recent20 if h["inst_net"])
+        rates     = [h["foreign_rate"] for h in recent20 if h["foreign_rate"] is not None]
+        rate_high = max(rates) if rates else None
+        rate_low  = min(rates) if rates else None
+
+        data = {
+            "foreign_rate":   foreign_rate_html,
+            "foreign_shares": foreign_shares,
+            "foreign_limit":  foreign_limit,
+            "history":        recent20[:15],  # 최근 15일만 전송
+            "net_20d_foreign": net_frgn,
+            "net_20d_inst":    net_inst,
+            "rate_period_high": rate_high,
+            "rate_period_low":  rate_low,
+        }
+        _foreign_cache[code] = {"data": data, "ts": now}
+        return data
+    except Exception as e:
+        app.logger.warning(f"외국인 보유현황 조회 실패 ({code}): {e}")
+        return {}
 
 
 def _fetch_realtime_price(code):
@@ -1080,6 +1191,17 @@ def parse_dart_fin(items):
     def bs_t(names):
         return _to_ok((_find_acct(idx, "BS", names) or {}).get("thstrm_amount", 0))
 
+    def bs_3y(names):
+        """BS 계정 3개년 → [oldest, prior, current] (억원)"""
+        it = _find_acct(idx, "BS", names)
+        if not it:
+            return [0, 0, 0]
+        return [
+            _to_ok(it.get("bfefrmtrm_amount", 0)),
+            _to_ok(it.get("frmtrm_amount",    0)),
+            _to_ok(it.get("thstrm_amount",    0)),
+        ]
+
     # 매출원가
     cogs_it = _find_acct(idx, IS_SECTS, ["매출원가", "매출액의 원가"])
     cogs_cur = abs(_to_ok((cogs_it or {}).get("thstrm_amount", 0)))
@@ -1217,6 +1339,26 @@ def parse_dart_fin(items):
     roe_vals        = [None, _safe_pct(ni[1], total_eq_p), roe_val]
     debt_ratio_vals = [None, _safe_pct(total_l_p, total_eq_p), debt_ratio]
 
+    # ── 자산회전율 분석 ────────────────────────────────────────
+    _ta3 = bs_3y(["자산총계"])
+    _ca3 = bs_3y(["유동자산"])
+    _na3 = bs_3y(["비유동자산"])
+    _iv3 = bs_3y(["재고자산"])
+    _ar3 = bs_3y(["매출채권 및 기타채권", "매출채권"])
+
+    def _r2(a, b):
+        return round(a / b, 3) if b else None
+
+    # 3개년 총자산 회전율 [oldest, prior, current]
+    _tat3 = [
+        _r2(rev[2], _ta3[0]),
+        _r2(rev[1], _ta3[1]),
+        _r2(rev[0], _ta3[2]),
+    ]
+    _tat  = _tat3[2]
+    _npm  = _r2(ni[0], rev[0])
+    _fl   = _r2(total_a, total_eq)
+
     return {
         "income_statement": {
             "years": years,
@@ -1278,6 +1420,20 @@ def parse_dart_fin(items):
             "eps": None, "bps": None,
             "debt_ratio": debt_ratio,
             "dividend_yield": None,
+        },
+        "asset_turnover": {
+            "years":  years,
+            "tat_3y": _tat3,
+            "tat":    _tat,
+            "cat":    _r2(rev[0], _ca3[2]),
+            "ncat":   _r2(rev[0], _na3[2]),
+            "oat":    _r2(rev[0], op_total),
+            "invt":   _r2(rev[0], _iv3[2]),
+            "art":    _r2(rev[0], _ar3[2]),
+            "npm":    _npm,
+            "fl":     _fl,
+            "sector_avg":  None,
+            "ai_comment":  None,
         },
         "_source": "dart",
     }
@@ -1464,8 +1620,14 @@ def get_stock(code):
     else:
         return jsonify({"error": "종목을 찾을 수 없습니다"}), 404
 
-    # Naver/Yahoo Finance 실시간 주가로 덮어쓰기
-    yp = _fetch_realtime_price(code)
+    # 실시간 주가 + 외국인 보유현황 병렬 조회
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=2) as _ex:
+        _yp_fut = _ex.submit(_fetch_realtime_price, code)
+        _fo_fut = _ex.submit(_fetch_foreign_ownership, code)
+    yp      = _yp_fut.result()
+    foreign = _fo_fut.result()
+
     if yp:
         info["current_price"] = yp["current_price"]
         info["prev_price"]    = yp["prev_price"]
@@ -1474,6 +1636,9 @@ def get_stock(code):
         if yp["market_cap"]: info["market_cap"]  = yp["market_cap"]
         if yp["market"]:     info["market"]      = yp["market"]
         info["_price_source"] = "realtime"
+        # 외국인 지분율 (integration API에서 직접 제공)
+        if yp.get("foreign_rate") is not None:
+            info["foreign_rate"] = yp["foreign_rate"]
     else:
         info["_price_source"] = "dummy"
 
@@ -1542,13 +1707,14 @@ def get_stock(code):
                  "employees": employees,
                  "_fin_source": fin.get("_source", "dummy"),
                  "_chart_source": hist.get("_source", "dummy")},
-        "price_history": {"dates": dates, "prices": prices},
-        "ratios":         ratios,
+        "price_history":     {"dates": dates, "prices": prices},
+        "ratios":            ratios,
         "income_summary": {
             "years":            rev_years,
             "revenue":          rev_list,
             "operating_profit": fin["income_statement"]["operating_profit"],
         },
+        "foreign_ownership": foreign,
     })
 
 
@@ -1570,9 +1736,60 @@ def get_price_history(code):
 def get_financials(code):
     if DART_KEY:
         dart_fin = get_dart_financials(code)
-        if dart_fin:
-            return jsonify(dart_fin)
-    return jsonify(FINANCIALS.get(code, FINANCIALS["005930"]))
+        fin = dart_fin if dart_fin else FINANCIALS.get(code, FINANCIALS["005930"])
+    else:
+        fin = FINANCIALS.get(code, FINANCIALS["005930"])
+
+    # 섹터 평균 자산회전율 & AI 코멘트 주입
+    co_sector = COMPANIES.get(code, {}).get("sector", "")
+    if not co_sector and DART_KEY:
+        dart_co   = get_dart_company(code)
+        co_sector = (dart_co or {}).get("sector", "") or ""
+    sector_avg_tat = 0.60
+    for k, v in SECTOR_TURNOVER_AVG.items():
+        if k in co_sector:
+            sector_avg_tat = v
+            break
+
+    fin = dict(fin)
+    at  = fin.get("asset_turnover")
+    if at:
+        at = dict(at)
+        at["sector_avg"] = sector_avg_tat
+        at["ai_comment"] = _turnover_ai(at.get("tat"), sector_avg_tat)
+        fin["asset_turnover"] = at
+    else:
+        # 더미 데이터: 가용 데이터로 asset_turnover 추산
+        is_  = fin.get("income_statement", {})
+        bs_  = fin.get("balance_sheet", {})
+        yrs  = is_.get("years", [])
+        revs = is_.get("revenue", [])
+        nis  = is_.get("net_income", [])
+        total_a  = bs_.get("total_assets",    0)
+        total_eq = bs_.get("total_equity",    0)
+        op_a  = (bs_.get("operating_assets") or {}).get("합계", 0)
+        inv_d = (bs_.get("operating_assets") or {}).get("재고자산", 0)
+        ar_d  = (bs_.get("operating_assets") or {}).get("매출채권", 0)
+        rev_c = revs[-1] if revs else 0
+        ni_c  = nis[-1]  if nis  else 0
+        def _rd(a, b): return round(a / b, 3) if b else None
+        tat_d = _rd(rev_c, total_a)
+        fin["asset_turnover"] = {
+            "years":      yrs[-3:],
+            "tat_3y":     [_rd(v, total_a) for v in revs[-3:]],
+            "tat":        tat_d,
+            "cat":        None,
+            "ncat":       None,
+            "oat":        _rd(rev_c, op_a)  if op_a  else None,
+            "invt":       _rd(rev_c, inv_d) if inv_d else None,
+            "art":        _rd(rev_c, ar_d)  if ar_d  else None,
+            "npm":        _rd(ni_c, rev_c),
+            "fl":         _rd(total_a, total_eq),
+            "sector_avg": sector_avg_tat,
+            "ai_comment": _turnover_ai(tat_d, sector_avg_tat),
+        }
+
+    return jsonify(fin)
 
 
 @app.route("/api/employees/<code>")
@@ -1654,9 +1871,27 @@ def get_employee_stats(code):
     })
 
 
+@app.route("/api/peers/<code>")
+def get_peers(code):
+    """동종업종 빠른 피어 목록 (AI 추천용)."""
+    peers = _fetch_naver_industry_peers(code)
+    result = []
+    for p in peers:
+        if p["code"] == code:
+            continue
+        result.append({"code": p["code"], "name": _clean_corp_name(p.get("name", p["code"]))})
+        if len(result) >= 5:
+            break
+    return jsonify(result)
+
+
 @app.route("/api/competitors/<code>")
 def get_competitors(code):
     from concurrent.futures import ThreadPoolExecutor
+
+    # 사용자가 직접 추가한 종목 (쿼리 파라미터 ?extra=000660,005380)
+    extra_param = request.args.get("extra", "").strip()
+    extra_codes = [c.strip() for c in extra_param.split(",") if c.strip()] if extra_param else []
 
     # 수동 경쟁사 목록 → 없으면 Naver 동종업종 자동 탐색
     comp_entries   = COMPETITORS.get(code, [])
@@ -1665,6 +1900,13 @@ def get_competitors(code):
         naver_peers  = _fetch_naver_industry_peers(code)
         comp_entries = [{"code": p["code"], "name": p["name"]} for p in naver_peers]
         naver_peer_map = {p["code"]: p for p in naver_peers}
+
+    # extra_codes 병합 (중복 제거)
+    existing = {c["code"] for c in comp_entries}
+    for ec in extra_codes:
+        if ec != code and ec not in existing:
+            comp_entries.append({"code": ec, "name": ec})
+            existing.add(ec)
 
     all_codes = [code] + [c["code"] for c in comp_entries]
 
@@ -1739,6 +1981,7 @@ def get_competitors(code):
             "per":           per,
             "pbr":           pbr,
             "roe":           rt.get("roe"),
+            "foreign_rate":  yp.get("foreign_rate") if yp else None,
             "is_main":       i == 0,
             "_source":       fin.get("_source", "dummy"),
             "_price_source": "realtime" if yp else "dummy",
@@ -2563,6 +2806,49 @@ SECTOR_THEMES = {
 }
 
 # ── 업종별 평균 PSR (Price-to-Sales Ratio) ──────────────────
+SECTOR_TURNOVER_AVG = {
+    "반도체/전자": 0.50, "반도체": 0.55,
+    "인터넷/IT서비스": 0.40, "소프트웨어": 0.45, "게임": 0.40,
+    "자동차": 0.70, "자동차부품": 0.80,
+    "전기전자": 0.65,
+    "바이오": 0.25, "헬스케어": 0.80, "의료기기": 0.90, "제약": 0.70,
+    "금융": 0.06, "은행": 0.05, "보험": 0.07,
+    "유통": 1.50, "음식료": 1.00,
+    "화학": 0.55, "철강": 0.60,
+    "통신": 0.35, "에너지": 0.45,
+    "건설": 0.65, "조선": 0.45, "방산": 0.55, "로봇": 0.50,
+    "항공": 0.50,
+}
+
+
+def _turnover_ai(tat, sector_avg):
+    """자산회전율 AI 한줄 평가."""
+    if tat is None:
+        return "자산회전율 데이터가 부족합니다."
+    if sector_avg:
+        ratio = tat / sector_avg
+        diff  = int(round((ratio - 1) * 100))
+        if ratio >= 1.3:
+            return (f"총자산 회전율 {tat:.2f}회/년으로 업종 평균({sector_avg:.2f}회) 대비 "
+                    f"{diff}% 높습니다. 자산을 매우 효율적으로 활용해 매출을 창출하고 있습니다.")
+        elif ratio >= 0.9:
+            return (f"총자산 회전율 {tat:.2f}회/년으로 업종 평균({sector_avg:.2f}회)과 유사합니다. "
+                    f"자산 활용 효율이 업종 내 평균 수준을 유지하고 있습니다.")
+        elif ratio >= 0.7:
+            return (f"총자산 회전율 {tat:.2f}회/년으로 업종 평균({sector_avg:.2f}회) 대비 "
+                    f"{abs(diff)}% 낮습니다. 잉여 자산 효율화 또는 매출 확대 전략 검토가 필요합니다.")
+        else:
+            return (f"총자산 회전율 {tat:.2f}회/년으로 업종 평균({sector_avg:.2f}회) 대비 "
+                    f"상당히 낮습니다. 자산 구조 개선이나 사업 효율화가 권고됩니다.")
+    if tat >= 1.5:
+        return f"총자산 회전율 {tat:.2f}회/년으로 자산 활용 효율이 매우 높습니다."
+    elif tat >= 0.8:
+        return f"총자산 회전율 {tat:.2f}회/년으로 양호한 자산 활용 효율을 보입니다."
+    elif tat >= 0.4:
+        return f"총자산 회전율 {tat:.2f}회/년으로 보통 수준의 자산 활용도입니다."
+    return f"총자산 회전율 {tat:.2f}회/년으로 자본집약적 특성 또는 자산 효율화 여지가 있습니다."
+
+
 SECTOR_PSR_AVG = {
     "반도체/전자":       1.2,
     "반도체":            1.5,
