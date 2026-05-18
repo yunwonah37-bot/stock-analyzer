@@ -1111,7 +1111,7 @@ def _dart_get(endpoint, params, cache_ttl=True):
         return _api_cache[key]
     try:
         p = {**params, "crtfc_key": DART_KEY}
-        r = requests.get(f"{DART_BASE}/{endpoint}", params=p, timeout=15)
+        r = requests.get(f"{DART_BASE}/{endpoint}", params=p, timeout=5)
         data = r.json()
         if data.get("status") == "000":
             if cache_ttl:
@@ -1617,23 +1617,28 @@ def get_stock(code):
 
     dummy = COMPANIES.get(code)
 
-    # 모든 독립적인 I/O 작업을 완전 병렬로 실행
-    with ThreadPoolExecutor(max_workers=7) as ex:
+    def _safe(fut, timeout=8):
+        try:
+            return fut.result(timeout=timeout)
+        except Exception:
+            return None
+
+    # 화면 표시에 필요한 핵심 데이터만 병렬 조회
+    # (직원수는 HR탭 전용이므로 stock 응답에서 제외)
+    with ThreadPoolExecutor(max_workers=6) as ex:
         dart_info_fut   = ex.submit(get_dart_company,        code) if DART_KEY else None
         dart_fin_fut    = ex.submit(get_dart_financials,     code) if DART_KEY else None
         dart_shares_fut = ex.submit(_fetch_dart_shares,      code) if DART_KEY else None
-        employees_fut   = ex.submit(_fetch_dart_employees,   code) if DART_KEY else None
         price_fut       = ex.submit(_fetch_realtime_price,   code)
         foreign_fut     = ex.submit(_fetch_foreign_ownership, code)
         history_fut     = ex.submit(_fetch_price_history,    code)
 
-    dart_info   = dart_info_fut.result()   if dart_info_fut   else None
-    dart_fin    = dart_fin_fut.result()    if dart_fin_fut    else None
-    dart_shares = dart_shares_fut.result() if dart_shares_fut else None
-    employees   = employees_fut.result()   if employees_fut   else None
-    yp          = price_fut.result()
-    foreign     = foreign_fut.result()
-    hist        = history_fut.result()
+    dart_info   = _safe(dart_info_fut)   if dart_info_fut   else None
+    dart_fin    = _safe(dart_fin_fut)    if dart_fin_fut    else None
+    dart_shares = _safe(dart_shares_fut) if dart_shares_fut else None
+    yp          = _safe(price_fut)
+    foreign     = _safe(foreign_fut)
+    hist        = _safe(history_fut)
 
     # 기본 기업 정보 조립
     if dummy:
@@ -1722,7 +1727,6 @@ def get_stock(code):
 
     result = {
         "info": {**info, "change": change, "change_pct": change_pct,
-                 "employees": employees,
                  "_fin_source": fin.get("_source", "dummy"),
                  "_chart_source": hist.get("_source", "dummy")},
         "price_history":     {"dates": dates, "prices": prices},
@@ -3048,7 +3052,7 @@ def _fetch_hankyung_consensus(code: str) -> dict:
 
     try:
         url = f"https://markets.hankyung.com/stock/{code}/consensus"
-        r = requests.get(url, headers=_HK_HDR, timeout=12)
+        r = requests.get(url, headers=_HK_HDR, timeout=4)
         if r.status_code != 200:
             return {}
         soup = BeautifulSoup(r.content, "lxml")
@@ -3482,10 +3486,15 @@ def get_ai_report(code):
     return jsonify(AI_REPORTS.get(code, AI_REPORTS["005930"]))
 
 
+_analyst_cache: dict = {}
+_ANALYST_TTL = 3600  # 1시간
+
 @app.route("/api/analyst/<code>")
 def get_analyst(code):
     """애널리스트 컨센서스: 한경 + 네이버 통합."""
-    from concurrent.futures import ThreadPoolExecutor
+    cached = _resp_get(_analyst_cache, code, _ANALYST_TTL)
+    if cached:
+        return jsonify(cached)
 
     def _naver():
         yp = _fetch_realtime_price(code)
@@ -3509,10 +3518,18 @@ def get_analyst(code):
     with ThreadPoolExecutor(max_workers=2) as ex:
         hk_fut = ex.submit(_fetch_hankyung_consensus, code)
         nv_fut = ex.submit(_naver)
-    hk = hk_fut.result()
-    nv = nv_fut.result()
+    try:
+        hk = hk_fut.result(timeout=5)
+    except Exception:
+        hk = {}
+    try:
+        nv = nv_fut.result(timeout=5)
+    except Exception:
+        nv = {}
 
-    return jsonify({"hankyung": hk, "naver": nv})
+    result = {"hankyung": hk, "naver": nv}
+    _resp_set(_analyst_cache, code, result)
+    return jsonify(result)
 
 
 @app.route("/api/status")

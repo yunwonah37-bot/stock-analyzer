@@ -190,7 +190,7 @@ function showSectionLoading(selector, label) {
   if (el) el.innerHTML = `<div class="section-loading">${label} 로딩 중</div>`;
 }
 
-async function loadCompany(code) {
+function loadCompany(code) {
   currentCode = code;
   document.getElementById('searchDropdown').classList.remove('show');
   document.getElementById('searchInput').value = '';
@@ -218,23 +218,25 @@ async function loadCompany(code) {
   showSectionLoading('#analystContent',  '애널리스트');
   showSectionLoading('#aiReportContent', 'AI 리포트');
 
-  // 5개 API 병렬 fetch 시작 (Promise 객체 — await 없이)
-  const stockPromise  = fetch(`/api/stock/${code}`).then(r => r.json());
-  const finPromise    = fetch(`/api/financials/${code}`).then(r => r.json());
-  const compPromise   = fetch(`/api/competitors/${code}`).then(r => r.json());
-  const aiPromise     = fetch(`/api/ai-report/${code}`).then(r => r.json());
+  // 1순위: stock (헤더·주가·핵심지표) — 가장 먼저 표시
+  const stockPromise = fetch(`/api/stock/${code}`).then(r => r.json());
+
+  // 2순위: financials + competitors + ai (stock과 동시 시작)
+  const finPromise  = fetch(`/api/financials/${code}`).then(r => r.json());
+  const compPromise = fetch(`/api/competitors/${code}`).then(r => r.json());
+  const aiPromise   = fetch(`/api/ai-report/${code}`).then(r => r.json());
+
+  // 3순위: analyst (느린 한경 스크래핑, 캐시 1시간) — 완전 독립
   const analystPromise = fetch(`/api/analyst/${code}`).then(r => r.json());
 
-  // 1단계: stock 데이터 도착 즉시 헤더 + 종합개요 렌더
-  let stockData = null;
+  // ── 1단계: stock 도착 → 헤더 + 종합개요 즉시 렌더 ──
   stockPromise.then(stock => {
-    if (currentCode !== code) return;   // 다른 종목이 선택된 경우 무시
-    stockData = stock;
+    if (currentCode !== code) return;
     renderHeader(stock.info);
     renderOverview(stock);
   }).catch(console.error);
 
-  // 2단계: financials 도착 시 재무 섹션 렌더 (stock도 필요하므로 둘 다 기다림)
+  // ── 2단계: financials 도착 → 재무 섹션 렌더 (stock도 필요) ──
   Promise.all([stockPromise, finPromise]).then(([stock, fin]) => {
     if (currentCode !== code) return;
     renderFinancials(fin);
@@ -242,26 +244,24 @@ async function loadCompany(code) {
     renderRnd(fin, stock);
   }).catch(console.error);
 
-  // 3단계: 경쟁사 도착 시 렌더
+  // ── 2단계: 경쟁사 도착 → 렌더 ──
   compPromise.then(comp => {
     if (currentCode !== code) return;
     initCompetitorsUI(code, comp);
   }).catch(console.error);
 
-  // 4단계: 애널리스트 (stock.info 필요)
-  Promise.all([stockPromise, analystPromise]).then(([stock, analyst]) => {
-    if (currentCode !== code) return;
-    renderAnalyst(analyst, stock.info);
-  }).catch(console.error);
-
-  // 5단계: AI 리포트
+  // ── 2단계: AI 리포트 도착 → 렌더 ──
   aiPromise.then(ai => {
     if (currentCode !== code) return;
     renderAiReport(ai);
   }).catch(console.error);
 
-  // 모든 데이터 완료 대기 (에러 방지용)
-  await Promise.allSettled([stockPromise, finPromise, compPromise, aiPromise, analystPromise]);
+  // ── 3단계: 애널리스트 도착 → 렌더 (stock.info 필요, 독립적으로 대기) ──
+  Promise.all([stockPromise, analystPromise]).then(([stock, analyst]) => {
+    if (currentCode !== code) return;
+    renderAnalyst(analyst, stock.info);
+  }).catch(console.error);
+  // await 없음 — 느린 analyst가 함수 전체를 블로킹하지 않도록
 }
 
 /* ── 기업 헤더 ─────────────────────────────────────────────── */
