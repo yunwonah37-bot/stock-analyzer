@@ -1292,3 +1292,51 @@ canvas { display: block; }
   .fo-donut-wrap   { flex-direction: column; }
   .fo-metric-value { font-size: 18px; }
 }
+
+/* ── 스켈레톤 로딩 ──────────────────────────────────────────── */
+@keyframes skeleton-shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position:  400px 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg,
+    #eef1f5 25%, #e2e6eb 50%, #eef1f5 75%);
+  background-size: 800px 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+  border-radius: var(--radius-sm);
+  display: inline-block;
+}
+.skeleton-block {
+  width: 100%; height: 100%;
+  background: linear-gradient(90deg,
+    #eef1f5 25%, #e2e6eb 50%, #eef1f5 75%);
+  background-size: 800px 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+  border-radius: var(--radius-sm);
+}
+
+/* 헤더 스켈레톤 */
+.skeleton-header { padding: 20px 0; }
+.skeleton-header .sk-name  { width: 220px; height: 26px; margin-bottom: 8px; }
+.skeleton-header .sk-code  { width: 140px; height: 16px; margin-bottom: 16px; }
+.skeleton-header .sk-price { width: 160px; height: 36px; margin-bottom: 6px; float: right; }
+.skeleton-header .sk-meta  { display: flex; gap: 16px; margin-top: 12px; }
+.skeleton-header .sk-meta span { width: 110px; height: 14px; }
+.skeleton-header .sk-desc  { width: 70%; height: 14px; margin-top: 12px; }
+
+/* 섹션 스켈레톤 */
+.section-loading {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 120px; gap: 10px; color: var(--text-faint);
+  font-size: 13px;
+}
+.section-loading::before {
+  content: '';
+  width: 18px; height: 18px;
+  border: 2px solid var(--border);
+  border-top-color: var(--blue);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes spin { to { transform: rotate(360deg); } }

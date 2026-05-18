@@ -163,12 +163,39 @@ function initSearch() {
 }
 
 /* ── 메인 로드 ─────────────────────────────────────────────── */
+function showSkeletonHeader() {
+  document.getElementById('companyHeader').innerHTML = `
+    <div class="skeleton-header">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start">
+        <div>
+          <div class="skeleton sk-name" style="width:200px;height:24px;display:block;margin-bottom:8px"></div>
+          <div class="skeleton sk-code" style="width:130px;height:14px;display:block;margin-bottom:12px"></div>
+        </div>
+        <div style="text-align:right">
+          <div class="skeleton sk-price" style="width:150px;height:34px;display:block;margin-bottom:6px;float:none"></div>
+          <div class="skeleton" style="width:110px;height:14px;display:block;margin-top:6px"></div>
+        </div>
+      </div>
+      <div style="display:flex;gap:16px;margin-top:14px;flex-wrap:wrap">
+        ${['120px','110px','110px','130px'].map(w =>
+          `<div class="skeleton" style="width:${w};height:14px;display:block"></div>`
+        ).join('')}
+      </div>
+      <div class="skeleton" style="width:65%;height:13px;display:block;margin-top:12px"></div>
+    </div>`;
+}
+
+function showSectionLoading(selector, label) {
+  const el = document.querySelector(selector);
+  if (el) el.innerHTML = `<div class="section-loading">${label} 로딩 중</div>`;
+}
+
 async function loadCompany(code) {
   currentCode = code;
   document.getElementById('searchDropdown').classList.remove('show');
   document.getElementById('searchInput').value = '';
 
-  // 빈 상태 숨기고 대시보드 표시
+  // 빈 상태 숨기고 대시보드 + 스켈레톤 즉시 표시
   document.getElementById('emptyState').style.display  = 'none';
   document.getElementById('dashboard').classList.add('show');
 
@@ -184,28 +211,57 @@ async function loadCompany(code) {
   document.getElementById('sectorContent').innerHTML = '';
   switchTab('overview', false);
 
-  // 데이터 병렬 로드
-  const [stockRes, finRes, compRes, aiRes, analystRes] = await Promise.all([
-    fetch(`/api/stock/${code}`),
-    fetch(`/api/financials/${code}`),
-    fetch(`/api/competitors/${code}`),
-    fetch(`/api/ai-report/${code}`),
-    fetch(`/api/analyst/${code}`),
-  ]);
-  const stock    = await stockRes.json();
-  const fin      = await finRes.json();
-  const comp     = await compRes.json();
-  const ai       = await aiRes.json();
-  const analyst  = await analystRes.json();
+  // 스켈레톤 즉시 표시
+  showSkeletonHeader();
+  showSectionLoading('#overviewKPI',     '핵심지표');
+  showSectionLoading('#ratiosGrid',      '투자지표');
+  showSectionLoading('#analystContent',  '애널리스트');
+  showSectionLoading('#aiReportContent', 'AI 리포트');
 
-  renderHeader(stock.info);
-  renderOverview(stock);
-  renderFinancials(fin);
-  renderCapex(fin, stock);
-  renderRnd(fin, stock);
-  initCompetitorsUI(code, comp);
-  renderAnalyst(analyst, stock.info);
-  renderAiReport(ai);
+  // 5개 API 병렬 fetch 시작 (Promise 객체 — await 없이)
+  const stockPromise  = fetch(`/api/stock/${code}`).then(r => r.json());
+  const finPromise    = fetch(`/api/financials/${code}`).then(r => r.json());
+  const compPromise   = fetch(`/api/competitors/${code}`).then(r => r.json());
+  const aiPromise     = fetch(`/api/ai-report/${code}`).then(r => r.json());
+  const analystPromise = fetch(`/api/analyst/${code}`).then(r => r.json());
+
+  // 1단계: stock 데이터 도착 즉시 헤더 + 종합개요 렌더
+  let stockData = null;
+  stockPromise.then(stock => {
+    if (currentCode !== code) return;   // 다른 종목이 선택된 경우 무시
+    stockData = stock;
+    renderHeader(stock.info);
+    renderOverview(stock);
+  }).catch(console.error);
+
+  // 2단계: financials 도착 시 재무 섹션 렌더 (stock도 필요하므로 둘 다 기다림)
+  Promise.all([stockPromise, finPromise]).then(([stock, fin]) => {
+    if (currentCode !== code) return;
+    renderFinancials(fin);
+    renderCapex(fin, stock);
+    renderRnd(fin, stock);
+  }).catch(console.error);
+
+  // 3단계: 경쟁사 도착 시 렌더
+  compPromise.then(comp => {
+    if (currentCode !== code) return;
+    initCompetitorsUI(code, comp);
+  }).catch(console.error);
+
+  // 4단계: 애널리스트 (stock.info 필요)
+  Promise.all([stockPromise, analystPromise]).then(([stock, analyst]) => {
+    if (currentCode !== code) return;
+    renderAnalyst(analyst, stock.info);
+  }).catch(console.error);
+
+  // 5단계: AI 리포트
+  aiPromise.then(ai => {
+    if (currentCode !== code) return;
+    renderAiReport(ai);
+  }).catch(console.error);
+
+  // 모든 데이터 완료 대기 (에러 방지용)
+  await Promise.allSettled([stockPromise, finPromise, compPromise, aiPromise, analystPromise]);
 }
 
 /* ── 기업 헤더 ─────────────────────────────────────────────── */
@@ -3146,27 +3202,8 @@ function renderSector(data) {
       <div class="kpi-note">${k.note}</div>
     </div>`).join('')}</div>`;
 
-  /* ── 2. 시총 순위 차트 + 지표 비교 ── */
-  const top10 = items.slice(0, 10);
-  const maxMcap = Math.max(...top10.map(x => x.market_cap || 0));
-
-  html += `<div class="grid-2">
-    <div class="card">
-      <div class="card-header">🏆 업종 내 시총 순위 <span class="card-sub">조원</span></div>
-      <div class="sector-rank-list">${top10.map((x, i) => {
-        const pct   = maxMcap > 0 ? (x.market_cap / maxMcap * 100).toFixed(1) : 0;
-        const mcapStr = fmtMcap(x.market_cap);
-        return `<div class="sector-rank-row${x.is_main ? ' is-main' : ''}">
-          <span class="sector-rank-no">${i+1}</span>
-          <span class="sector-rank-name">${x.name}${x.is_main ? ' <span class="me-badge">나</span>' : ''}</span>
-          <div class="sector-rank-bar-wrap">
-            <div class="sector-rank-bar${x.is_main ? ' main' : ''}" style="width:${pct}%"></div>
-          </div>
-          <span class="sector-rank-val">${mcapStr}</span>
-        </div>`;
-      }).join('')}</div>
-    </div>
-    <div class="card">
+  /* ── 2. 가치지표 비교 ── */
+  html += `<div class="card">
       <div class="card-header">📊 업종 내 가치지표 비교</div>
       <table class="fin-table">
         <thead><tr><th>지표</th><th>${data.name}</th><th>섹터 평균</th><th>평가</th></tr></thead>
@@ -3202,8 +3239,7 @@ function renderSector(data) {
           ${mainItem.change_pct >= 0 ? '▲' : '▼'}${Math.abs(mainItem.change_pct).toFixed(2)}%
         </span> · 현재가 ${(mainItem.current_price||0).toLocaleString()}원
       </div>` : ''}
-    </div>
-  </div>`;
+    </div>`;
 
   /* ── 3. 동종업종 전체 종목 테이블 ── */
   html += `<div class="card">

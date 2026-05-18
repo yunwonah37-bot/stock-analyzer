@@ -3,9 +3,10 @@ Stock Analyzer — Flask 서버
 DART 전자공시 API로 기업정보 및 재무제표 실데이터 조회
 DART 미지원 항목(주가·PER 등)은 더미 데이터 폴백
 """
-import os, random, threading, zipfile, io, re
+import os, random, threading, zipfile, io, re, time as _time
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor
 
 import requests
 from bs4 import BeautifulSoup
@@ -454,6 +455,22 @@ for _code in COMPANIES:
         "analyst": "AI 분석 엔진 v2.1", "date": "2025-05-12",
     }
 
+# ── 응답 레벨 TTL 캐시 ─────────────────────────────────────────
+_stock_resp_cache: dict = {}   # code → {"data": dict, "ts": float}
+_fin_resp_cache:   dict = {}   # code → {"data": dict, "ts": float}
+_STOCK_RESP_TTL = 300          # 5분 (주가 포함이므로 짧게)
+_FIN_RESP_TTL   = 86400        # 24시간
+
+def _resp_get(cache: dict, key: str, ttl: int):
+    entry = cache.get(key)
+    if entry and (_time.monotonic() - entry["ts"]) < ttl:
+        return entry["data"]
+    return None
+
+def _resp_set(cache: dict, key: str, data):
+    cache[key] = {"data": data, "ts": _time.monotonic()}
+
+
 # ── 실시간 시세 (Naver Finance 1차, Yahoo Finance 2차) ─────────
 _price_cache   = {}   # code → {"data": {...}, "ts": datetime}
 _history_cache = {}   # code → {"data": {...}, "ts": datetime}
@@ -461,7 +478,7 @@ _shares_cache  = {}   # code → {"shares": int, "ts": datetime}
 _peers_cache   = {}   # code → {"data": [...], "ts": datetime}
 _emp_cache     = {}   # code → {"count": int, "ts": datetime}
 _exec_cache    = {}   # code → {"data": {...}, "ts": datetime}
-_PRICE_TTL     = 60        # 초
+_PRICE_TTL     = 300       # 5분
 _HISTORY_TTL   = 300       # 5분
 _SHARES_TTL    = 3600 * 6  # 6시간
 _PEERS_TTL     = 3600      # 1시간
@@ -1593,17 +1610,38 @@ def search():
 
 @app.route("/api/stock/<code>")
 def get_stock(code):
-    # 기본 기업 정보 (더미 우선, DART 보완)
-    dummy = COMPANIES.get(code)
-    dart_info = get_dart_company(code) if DART_KEY else None
+    # 응답 캐시 확인 (5분)
+    cached = _resp_get(_stock_resp_cache, code, _STOCK_RESP_TTL)
+    if cached:
+        return jsonify(cached)
 
+    dummy = COMPANIES.get(code)
+
+    # 모든 독립적인 I/O 작업을 완전 병렬로 실행
+    with ThreadPoolExecutor(max_workers=7) as ex:
+        dart_info_fut   = ex.submit(get_dart_company,        code) if DART_KEY else None
+        dart_fin_fut    = ex.submit(get_dart_financials,     code) if DART_KEY else None
+        dart_shares_fut = ex.submit(_fetch_dart_shares,      code) if DART_KEY else None
+        employees_fut   = ex.submit(_fetch_dart_employees,   code) if DART_KEY else None
+        price_fut       = ex.submit(_fetch_realtime_price,   code)
+        foreign_fut     = ex.submit(_fetch_foreign_ownership, code)
+        history_fut     = ex.submit(_fetch_price_history,    code)
+
+    dart_info   = dart_info_fut.result()   if dart_info_fut   else None
+    dart_fin    = dart_fin_fut.result()    if dart_fin_fut    else None
+    dart_shares = dart_shares_fut.result() if dart_shares_fut else None
+    employees   = employees_fut.result()   if employees_fut   else None
+    yp          = price_fut.result()
+    foreign     = foreign_fut.result()
+    hist        = history_fut.result()
+
+    # 기본 기업 정보 조립
     if dummy:
         info = dict(dummy)
         if dart_info:
             info["description"] = dart_info["description"]
             if dart_info["market"]: info["market"] = dart_info["market"]
     elif dart_info:
-        # DART에서 찾은 미등록 종목
         info = {
             "name":          dart_info["name"],
             "code":          code,
@@ -1620,14 +1658,6 @@ def get_stock(code):
     else:
         return jsonify({"error": "종목을 찾을 수 없습니다"}), 404
 
-    # 실시간 주가 + 외국인 보유현황 병렬 조회
-    from concurrent.futures import ThreadPoolExecutor
-    with ThreadPoolExecutor(max_workers=2) as _ex:
-        _yp_fut = _ex.submit(_fetch_realtime_price, code)
-        _fo_fut = _ex.submit(_fetch_foreign_ownership, code)
-    yp      = _yp_fut.result()
-    foreign = _fo_fut.result()
-
     if yp:
         info["current_price"] = yp["current_price"]
         info["prev_price"]    = yp["prev_price"]
@@ -1636,26 +1666,20 @@ def get_stock(code):
         if yp["market_cap"]: info["market_cap"]  = yp["market_cap"]
         if yp["market"]:     info["market"]      = yp["market"]
         info["_price_source"] = "realtime"
-        # 외국인 지분율 (integration API에서 직접 제공)
         if yp.get("foreign_rate") is not None:
             info["foreign_rate"] = yp["foreign_rate"]
     else:
         info["_price_source"] = "dummy"
 
-    # DART 보통주 발행주식 총수로 덮어쓰기
-    dart_shares = _fetch_dart_shares(code)
     if dart_shares:
         info["shares"] = dart_shares
 
-    # 실시간 주가 히스토리 (Yahoo Finance 3개월 일봉, 실패 시 더미 폴백)
-    hist = _fetch_price_history(code)
     if hist:
         dates, prices = hist["dates"], hist["prices"]
     else:
         dates, prices = gen_prices(info["current_price"] or 10000, hash(code) % 9999)
         hist = {"_source": "dummy"}
 
-    # 등락 — Naver가 직접 제공하면 사용 (시장 마감 시에도 정확), 아니면 직접 계산
     if yp and "change" in yp:
         change     = yp["change"]
         change_pct = yp["change_pct"]
@@ -1664,11 +1688,8 @@ def get_stock(code):
         change     = diff
         change_pct = round(diff / info["prev_price"] * 100, 2) if info["prev_price"] else 0.0
 
-    # 재무 요약 (DART 우선, 더미 폴백)
-    dart_fin = get_dart_financials(code) if DART_KEY else None
     fin = dart_fin or FINANCIALS.get(code, FINANCIALS["005930"])
 
-    # Naver Finance PER·PBR·EPS·BPS·배당으로 ratios 덮어쓰기 (yp는 위에서 이미 조회)
     ratios = dict(fin["ratios"])
     if yp:
         if yp.get("per")           is not None: ratios["per"]            = yp["per"]
@@ -1680,13 +1701,10 @@ def get_stock(code):
     else:
         ratios.setdefault("_ratio_source", "dart" if dart_fin else "dummy")
 
-    employees = _fetch_dart_employees(code) if DART_KEY else None
-
-    # PSR 계산 (시가총액 ÷ 최근 연간 매출액, 단위 동일 억원)
-    mc       = info.get("market_cap") or 0
-    rev_list = fin["income_statement"]["revenue"]
-    rev_years= fin["income_statement"]["years"]
-    sector   = info.get("sector") or COMPANIES.get(code, {}).get("sector", "")
+    mc        = info.get("market_cap") or 0
+    rev_list  = fin["income_statement"]["revenue"]
+    rev_years = fin["income_statement"]["years"]
+    sector    = info.get("sector") or COMPANIES.get(code, {}).get("sector", "")
 
     psr = round(mc / rev_list[-1], 2) if mc and rev_list and rev_list[-1] else None
     psr_history = [round(mc / r, 2) if mc and r else None for r in rev_list]
@@ -1702,7 +1720,7 @@ def get_stock(code):
     ratios["psr_years"]   = rev_years
     ratios["sector_psr"]  = sector_psr
 
-    return jsonify({
+    result = {
         "info": {**info, "change": change, "change_pct": change_pct,
                  "employees": employees,
                  "_fin_source": fin.get("_source", "dummy"),
@@ -1715,7 +1733,9 @@ def get_stock(code):
             "operating_profit": fin["income_statement"]["operating_profit"],
         },
         "foreign_ownership": foreign,
-    })
+    }
+    _resp_set(_stock_resp_cache, code, result)
+    return jsonify(result)
 
 
 @app.route("/api/price-history/<code>")
@@ -1734,17 +1754,27 @@ def get_price_history(code):
 
 @app.route("/api/financials/<code>")
 def get_financials(code):
+    # 응답 캐시 확인 (24시간)
+    cached = _resp_get(_fin_resp_cache, code, _FIN_RESP_TTL)
+    if cached:
+        return jsonify(cached)
+
     if DART_KEY:
-        dart_fin = get_dart_financials(code)
-        fin = dart_fin if dart_fin else FINANCIALS.get(code, FINANCIALS["005930"])
+        # dart_financials + dart_company 병렬 조회
+        with ThreadPoolExecutor(max_workers=2) as ex:
+            fin_fut = ex.submit(get_dart_financials, code)
+            co_fut  = ex.submit(get_dart_company,    code)
+        dart_fin  = fin_fut.result()
+        dart_co   = co_fut.result()
+        fin       = dart_fin if dart_fin else FINANCIALS.get(code, FINANCIALS["005930"])
+        co_sector = (dart_co or {}).get("sector", "") or COMPANIES.get(code, {}).get("sector", "")
     else:
-        fin = FINANCIALS.get(code, FINANCIALS["005930"])
+        fin       = FINANCIALS.get(code, FINANCIALS["005930"])
+        co_sector = COMPANIES.get(code, {}).get("sector", "")
 
     # 섹터 평균 자산회전율 & AI 코멘트 주입
-    co_sector = COMPANIES.get(code, {}).get("sector", "")
-    if not co_sector and DART_KEY:
-        dart_co   = get_dart_company(code)
-        co_sector = (dart_co or {}).get("sector", "") or ""
+    if not co_sector:
+        co_sector = ""
     sector_avg_tat = 0.60
     for k, v in SECTOR_TURNOVER_AVG.items():
         if k in co_sector:
@@ -1789,6 +1819,7 @@ def get_financials(code):
             "ai_comment": _turnover_ai(tat_d, sector_avg_tat),
         }
 
+    _resp_set(_fin_resp_cache, code, fin)
     return jsonify(fin)
 
 
