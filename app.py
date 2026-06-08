@@ -1561,6 +1561,20 @@ def index():
     return render_template("index.html")
 
 
+# 한글-영문 별칭 매핑 (DART에 영문으로 등록된 기업 검색 보완)
+_ALIAS_MAP = {
+    "네이버": ["NAVER"], "naver": ["NAVER"],
+    "카카오": ["카카오", "KAKAO"], "kakao": ["카카오", "KAKAO"],
+    "엘지": ["LG"], "lg": ["LG"],
+    "sk": ["SK"], "에스케이": ["SK"],
+    "kt": ["KT"], "케이티": ["KT"],
+    "포스코": ["POSCO"], "posco": ["POSCO"],
+    "셀트리온": ["셀트리온", "Celltrion"],
+    "크래프톤": ["크래프톤", "KRAFTON"], "krafton": ["KRAFTON", "크래프톤"],
+    "카카오뱅크": ["카카오뱅크", "kakaobank"],
+    "하이브": ["하이브", "HYBE"], "hybe": ["HYBE", "하이브"],
+}
+
 @app.route("/api/search")
 def search():
     q = request.args.get("q", "").strip()
@@ -1575,14 +1589,19 @@ def search():
             name = entry["name"]
             sc   = entry["stock_code"]
             # 매칭 점수: 0=정확일치 1=접두사 2=포함
-            if q == name or q == sc:
-                score = 0
-            elif name.startswith(q):
-                score = 1
-            elif q in name or q in sc:
-                score = 2
-            else:
-                continue
+            q_lower = q.lower()
+            extra   = _ALIAS_MAP.get(q, _ALIAS_MAP.get(q_lower, []))
+            q_terms = list(dict.fromkeys([q] + extra))
+            name_lw = name.lower()
+            score   = None
+            for term in q_terms:
+                t = term.lower()
+                if t == name_lw or t == sc.lower(): s = 0
+                elif name_lw.startswith(t): s = 1
+                elif t in name_lw or t in sc.lower(): s = 2
+                else: continue
+                if score is None or s < score: score = s
+            if score is None: continue
             if sc in seen:
                 continue
             seen.add(sc)
