@@ -3420,20 +3420,33 @@ function renderNPV(data) {
   let netDebt     = data.net_debt_ok || 0;
   const name      = data.name || currentCode;
 
-  let discount     = 20;
+  let discount     = 10;
   let termGrow     = 2;
-  let adjRate      = -2;
   let currentPrice = (window.stockData && window.stockData.price) ? window.stockData.price : 0;
+  let activeScenario = 'base';
 
-  function calcNPV(opArr, disc, g, adj, price, shares, nd) {
+  // 전체 CAGR + 최근 3년 CAGR 계산
+  function getBaseAndCagr(opArr) {
+    const n = opArr.length - 1;
+    if (n < 1) return { rawCagr: 0, recentCagr: 0 };
+    const first = opArr[0], last = opArr[n];
+    const rawCagr = (first > 0 && last > 0) ? Math.pow(last / first, 1 / n) - 1 : 0;
+    let recentCagr = rawCagr;
+    if (n >= 3) {
+      const p3 = opArr[n - 3];
+      recentCagr = (p3 > 0 && last > 0) ? Math.pow(last / p3, 1 / 3) - 1 : rawCagr;
+    }
+    return { rawCagr, recentCagr };
+  }
+
+  function calcNPV(opArr, growthRate, disc, g, price, shares, nd) {
     if (opArr.length < 2) return null;
-    const first = opArr[0], last = opArr[opArr.length - 1];
-    const n     = opArr.length - 1;
-    const rawCagr = Math.pow(last / first, 1 / n) - 1;
-    const adjCagr = rawCagr + adj / 100;
+    const last = opArr[opArr.length - 1];
+    if (last <= 0) return null;
     const r = disc / 100, gR = g / 100;
+    if (r <= gR) return null;
     const futProfit = [];
-    for (let i = 1; i <= 10; i++) futProfit.push(last * Math.pow(1 + adjCagr, i));
+    for (let i = 1; i <= 10; i++) futProfit.push(last * Math.pow(1 + growthRate, i));
     const pvs   = futProfit.map((cf, i) => (cf * 1e8) / Math.pow(1 + r, i + 1));
     const tv    = (futProfit[9] * 1e8 * (1 + gR)) / (r - gR);
     const pvTv  = tv / Math.pow(1 + r, 10);
@@ -3441,52 +3454,81 @@ function renderNPV(data) {
     const equityV   = totalPV - nd * 1e8;
     const intrinsic = shares > 0 ? equityV / shares : 0;
     const margin    = price > 0 ? (intrinsic - price) / price * 100 : 0;
-    return { rawCagr, adjCagr, futProfit, pvs, pvTv, totalPV, equityV, intrinsic, margin };
+    return { growthRate, futProfit, pvs, pvTv, totalPV, equityV, intrinsic, margin };
   }
 
   function fmt(n) { return Math.round(n).toLocaleString('ko-KR'); }
 
+  function verdictInfo(res) {
+    if (!res || currentPrice <= 0) return { color: '#888', bg: 'var(--bg-secondary)', label: '—' };
+    if (res.intrinsic > currentPrice * 1.1) return { color: '#1D8A4A', bg: '#E8F5E9', label: '저평가' };
+    if (res.intrinsic < currentPrice * 0.9) return { color: '#C0392B', bg: '#FFEBEE', label: '고평가' };
+    return                                         { color: '#9B6B00', bg: '#FFF8E1', label: '적정'   };
+  }
+
   function render() {
-    const res = calcNPV(opList, discount, termGrow, adjRate, currentPrice, sharesRaw, netDebt);
-    if (!res) { container.innerHTML = '<div class="card"><div class="rnd-nodata-desc">데이터 부족</div></div>'; return; }
-    const { rawCagr, adjCagr, futProfit, pvs, pvTv, intrinsic, margin } = res;
-    const verdict = intrinsic > currentPrice * 1.1 ? 'cheap' : intrinsic < currentPrice * 0.9 ? 'expensive' : 'fair';
-    const vColor  = { cheap: '#3B6D11', fair: '#854F0B', expensive: '#A32D2D' };
-    const vBg     = { cheap: '#EAF3DE', fair: '#FAEEDA', expensive: '#FCEBEB' };
-    const vText   = { cheap: `저평가 — 적정가 대비 ${Math.abs(margin).toFixed(1)}% 낮은 수준`, fair: `적정 수준 — 괴리율 ${Math.abs(margin).toFixed(1)}%`, expensive: `고평가 — 적정가 대비 ${Math.abs(margin).toFixed(1)}% 높은 수준` };
-    let cum = 0;
-    const tRows = pvs.map((pv, i) => {
-      cum += pv;
-      return `<tr><td>+${i+1}년</td><td style="text-align:right">${fmt(Math.round(futProfit[i]))}억</td><td style="text-align:right">${fmt(Math.round(pv/1e8))}억</td><td style="text-align:right">${fmt(Math.round(cum/1e8))}억</td></tr>`;
-    }).join('') + `<tr style="font-weight:600"><td>터미널밸류</td><td style="text-align:right">—</td><td style="text-align:right">${fmt(Math.round(pvTv/1e8))}억</td><td style="text-align:right">${fmt(Math.round((cum+pvTv)/1e8))}억</td></tr>`;
+    const { rawCagr, recentCagr } = getBaseAndCagr(opList);
+
+    const scenarios = [
+      { id: 'optimistic',   label: '낙관',    desc: `전체CAGR ${(rawCagr*100).toFixed(1)}%`,            growth: rawCagr        },
+      { id: 'base',         label: '기준',    desc: `CAGR−2%p (${((rawCagr-0.02)*100).toFixed(1)}%)`,  growth: rawCagr - 0.02 },
+      { id: 'recent',       label: '최근3년', desc: `3년CAGR ${(recentCagr*100).toFixed(1)}%`,          growth: recentCagr     },
+      { id: 'conservative', label: '보수',    desc: '무성장 0%',                                         growth: 0              },
+    ];
+
+    const results = scenarios.map(s => ({
+      ...s,
+      res: calcNPV(opList, s.growth, discount, termGrow, currentPrice, sharesRaw, netDebt)
+    }));
+
+    const active = results.find(r => r.id === activeScenario) || results[1];
+    const aRes   = active.res;
+
+    const scenarioCards = results.map(s => {
+      const r  = s.res;
+      const vi = verdictInfo(r);
+      const isActive    = s.id === activeScenario;
+      const priceStr    = r ? `${fmt(Math.round(r.intrinsic))}원` : '계산불가';
+      const marginStr   = r ? `${r.margin >= 0 ? '+' : ''}${r.margin.toFixed(1)}%` : '—';
+      const marginColor = r && r.margin >= 0 ? '#1D8A4A' : '#C0392B';
+      return `
+        <div onclick="npvSelectScenario('${s.id}')" style="cursor:pointer;border-radius:10px;padding:16px 12px;background:var(--bg${isActive?'-secondary':''});border:2px solid ${isActive?'var(--accent)':'var(--border)'};transition:border-color .15s">
+          <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:3px">${s.label}</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px;line-height:1.4">${s.desc}</div>
+          <div style="font-size:18px;font-weight:700;color:var(--text);margin-bottom:4px">${priceStr}</div>
+          <div style="font-size:13px;font-weight:600;color:${marginColor}">${marginStr}</div>
+          <div style="margin-top:8px;display:inline-block;font-size:11px;padding:2px 8px;border-radius:10px;background:${vi.bg};color:${vi.color};font-weight:600">${vi.label}</div>
+        </div>`;
+    }).join('');
+
+    let tRows = '';
+    if (aRes) {
+      let cum = 0;
+      tRows = aRes.pvs.map((pv, i) => {
+        cum += pv;
+        return `<tr><td style="padding:6px 8px">+${i+1}년</td><td style="text-align:right;padding:6px 8px">${fmt(Math.round(aRes.futProfit[i]))}억</td><td style="text-align:right;padding:6px 8px">${fmt(Math.round(pv/1e8))}억</td><td style="text-align:right;padding:6px 8px">${fmt(Math.round(cum/1e8))}억</td></tr>`;
+      }).join('') + `<tr style="font-weight:600;border-top:2px solid var(--border)"><td style="padding:6px 8px">터미널밸류</td><td style="text-align:right;padding:6px 8px">—</td><td style="text-align:right;padding:6px 8px">${fmt(Math.round(aRes.pvTv/1e8))}억</td><td style="text-align:right;padding:6px 8px">${fmt(Math.round((cum+aRes.pvTv)/1e8))}억</td></tr>`;
+    }
+
+    const vi = verdictInfo(aRes);
 
     container.innerHTML = `
       <div class="card">
         <div class="card-header">NPV 밸류에이션 — ${name} <span class="src-badge dart" style="font-size:9px;padding:1px 6px;margin-left:8px">DART 실데이터</span></div>
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px">
-          <div style="background:var(--bg-secondary);border-radius:8px;padding:14px">
-            <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">과거 CAGR (${years.length-1}년)</div>
-            <div style="font-size:22px;font-weight:600">${(rawCagr*100).toFixed(1)}%</div>
-          </div>
-          <div style="background:var(--bg-secondary);border-radius:8px;padding:14px">
-            <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">적용 성장률 (보정 후)</div>
-            <div style="font-size:22px;font-weight:600">${(adjCagr*100).toFixed(1)}%</div>
-          </div>
-          <div style="background:var(--bg-secondary);border-radius:8px;padding:14px">
-            <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">NPV 적정주가</div>
-            <div style="font-size:22px;font-weight:600">${fmt(Math.round(intrinsic))}원</div>
-          </div>
+
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:20px">
+          ${scenarioCards}
         </div>
-        <div style="background:${vBg[verdict]};border-radius:8px;padding:14px 18px;margin-bottom:20px;color:${vColor[verdict]};font-weight:600">
-          ${vText[verdict]} <span style="font-weight:400;font-size:13px">(현재가 ${fmt(currentPrice)}원 / 적정가 ${fmt(Math.round(intrinsic))}원)</span>
-        </div>
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:20px">
+
+        ${aRes ? `<div style="background:${vi.bg};border-radius:8px;padding:12px 16px;margin-bottom:20px;color:${vi.color};font-weight:600;font-size:13px">
+          ${active.label} 시나리오: ${vi.label} — 적정가 ${fmt(Math.round(aRes.intrinsic))}원 / 현재가 ${fmt(currentPrice)}원 (${aRes.margin>=0?'+':''}${aRes.margin.toFixed(1)}%)
+        </div>` : ''}
+
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px">
           <div><label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:6px">할인율 (%)</label>
             <input type="number" id="npvDiscount" value="${discount}" min="5" max="50" step="1" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:14px"></div>
           <div><label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:6px">영구성장률 g (%)</label>
             <input type="number" id="npvTermGrow" value="${termGrow}" min="0" max="10" step="0.5" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:14px"></div>
-          <div><label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:6px">성장률 보정 (%p)</label>
-            <input type="number" id="npvAdj" value="${adjRate}" min="-20" max="20" step="1" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:14px"></div>
           <div><label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:6px">현재 주가 (원)</label>
             <input type="number" id="npvPrice" value="${currentPrice}" step="100" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:14px"></div>
           <div><label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:6px">발행주식수 (만주)</label>
@@ -3494,7 +3536,12 @@ function renderNPV(data) {
           <div><label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:6px">순부채 (억원)</label>
             <input type="number" id="npvNetDebt" value="${Math.round(netDebt)}" step="10" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:14px"></div>
         </div>
-        <button onclick="npvRecalc()" style="margin-bottom:20px;padding:10px 24px;border:1px solid var(--border);border-radius:6px;background:var(--bg-secondary);color:var(--text);cursor:pointer;font-size:14px">🔄 재계산</button>
+
+        <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--border)">
+          ${active.label} 시나리오 상세 <span style="font-size:11px;font-weight:400;color:var(--text-muted)">— 카드 클릭으로 시나리오 전환</span>
+        </div>
+
+        ${aRes ? `
         <div style="overflow-x:auto;margin-bottom:20px">
           <table style="width:100%;border-collapse:collapse;font-size:13px">
             <thead><tr style="border-bottom:1px solid var(--border)">
@@ -3509,44 +3556,49 @@ function renderNPV(data) {
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px">
           <div><div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;font-weight:500">과거 영업이익 추이 (억원)</div>
             <div style="position:relative;height:200px"><canvas id="npvHistChart"></canvas></div></div>
-          <div><div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;font-weight:500">미래 추정 + 할인 현재가치</div>
+          <div><div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;font-weight:500">${active.label} 시나리오 — 추정 영업이익 vs PV</div>
             <div style="position:relative;height:200px"><canvas id="npvFutChart"></canvas></div></div>
-        </div>
+        </div>` : '<div style="color:var(--text-muted);font-size:13px;padding:16px 0">계산 불가 (영업이익 음수 또는 데이터 부족)</div>'}
+
         <div style="font-size:12px;color:var(--text-muted);line-height:1.7;border-top:1px solid var(--border);padding-top:12px">
-          <b>계산 방식:</b> 과거 ${years.length-1}년 CAGR → 성장률 보정 → 향후 10년 영업이익 추정 → 할인율 ${discount}%로 현재가치 환산 → 터미널밸류 합산 → 순부채 차감 → 주식수 나눠 적정주가 산출<br>
+          <b>4가지 추정 방식:</b> 낙관(전체CAGR) · 기준(CAGR−2%p) · 최근3년(최근3년CAGR) · 보수(무성장 0%)<br>
+          <b>계산:</b> 각 성장률로 10년 영업이익 추정 → 할인율 ${discount}%로 PV 환산 → 터미널밸류 합산 → 순부채 차감 → 주식수 나눠 적정주가 산출<br>
           <b>주의:</b> 영업이익 기반 추정치로, 실제 FCF 기반 DCF와 다를 수 있습니다. 참고용으로만 활용하세요.
         </div>
       </div>`;
 
-    setTimeout(() => {
-      const isDark = document.body.classList.contains('dark');
-      const gridC  = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)';
-      const tickC  = isDark ? '#aaa' : '#888';
-      new Chart(document.getElementById('npvHistChart'), {
-        type: 'bar',
-        data: { labels: years, datasets: [{ label: '영업이익(억)', data: opList, backgroundColor: '#378ADD', borderWidth: 0 }] },
-        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
-          scales: { x: { ticks: { font:{size:10}, color:tickC, maxRotation:45 }, grid:{display:false} }, y: { ticks: { callback: v => fmt(v)+'억', font:{size:10}, color:tickC }, grid:{color:gridC} } } }
-      });
-      const futLabels = Array.from({length:10}, (_,i) => `+${i+1}년`);
-      new Chart(document.getElementById('npvFutChart'), {
-        type: 'bar',
-        data: { labels: futLabels, datasets: [
-          { label: '추정 영업이익', data: futProfit.map(v => Math.round(v)), backgroundColor: '#1D9E75', borderWidth: 0 },
-          { label: '할인 현재가치', data: pvs.map(v => Math.round(v/1e8)), backgroundColor: 'rgba(216,90,48,0.5)', borderWidth: 0 }
-        ]},
-        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: true, labels:{font:{size:11},color:tickC,boxWidth:12} } },
-          scales: { x: { ticks:{font:{size:10},color:tickC}, grid:{display:false} }, y: { ticks:{callback:v=>fmt(v)+'억',font:{size:10},color:tickC}, grid:{color:gridC} } } }
-      });
-    }, 100);
+    if (aRes) {
+      setTimeout(() => {
+        const isDark = document.body.classList.contains('dark');
+        const gridC  = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.07)';
+        const tickC  = isDark ? '#aaa' : '#888';
+        new Chart(document.getElementById('npvHistChart'), {
+          type: 'bar',
+          data: { labels: years, datasets: [{ label: '영업이익(억)', data: opList, backgroundColor: '#378ADD', borderWidth: 0 }] },
+          options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
+            scales: { x: { ticks: { font:{size:10}, color:tickC, maxRotation:45 }, grid:{display:false} }, y: { ticks: { callback: v => fmt(v)+'억', font:{size:10}, color:tickC }, grid:{color:gridC} } } }
+        });
+        const futLabels = Array.from({length:10}, (_,i) => `+${i+1}년`);
+        new Chart(document.getElementById('npvFutChart'), {
+          type: 'bar',
+          data: { labels: futLabels, datasets: [
+            { label: '추정 영업이익', data: aRes.futProfit.map(v => Math.round(v)), backgroundColor: '#1D9E75', borderWidth: 0 },
+            { label: '할인 현재가치', data: aRes.pvs.map(v => Math.round(v/1e8)), backgroundColor: 'rgba(216,90,48,0.5)', borderWidth: 0 }
+          ]},
+          options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: true, labels:{font:{size:11},color:tickC,boxWidth:12} } },
+            scales: { x: { ticks:{font:{size:10},color:tickC}, grid:{display:false} }, y: { ticks:{callback:v=>fmt(v)+'억',font:{size:10},color:tickC}, grid:{color:gridC} } } }
+        });
+      }, 100);
+    }
 
-    document.getElementById('npvDiscount').onchange = () => { discount = +document.getElementById('npvDiscount').value; render(); };
-    document.getElementById('npvTermGrow').onchange = () => { termGrow = +document.getElementById('npvTermGrow').value; render(); };
-    document.getElementById('npvAdj').onchange      = () => { adjRate  = +document.getElementById('npvAdj').value; render(); };
-    document.getElementById('npvPrice').onchange    = () => { currentPrice = +document.getElementById('npvPrice').value; render(); };
-    document.getElementById('npvShares').onchange   = () => { sharesRaw = +document.getElementById('npvShares').value * 10000; render(); };
-    document.getElementById('npvNetDebt').onchange  = () => { netDebt = +document.getElementById('npvNetDebt').value; render(); };
+    document.getElementById('npvDiscount').onchange = () => { discount     = +document.getElementById('npvDiscount').value; render(); };
+    document.getElementById('npvTermGrow').onchange = () => { termGrow     = +document.getElementById('npvTermGrow').value; render(); };
+    document.getElementById('npvPrice').onchange    = () => { currentPrice = +document.getElementById('npvPrice').value;    render(); };
+    document.getElementById('npvShares').onchange   = () => { sharesRaw    = +document.getElementById('npvShares').value * 10000; render(); };
+    document.getElementById('npvNetDebt').onchange  = () => { netDebt      = +document.getElementById('npvNetDebt').value;  render(); };
   }
+
+  window.npvSelectScenario = function(id) { activeScenario = id; render(); };
   render();
 }
 
