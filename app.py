@@ -3608,9 +3608,11 @@ def get_npv_data(code):
     dart_fin = get_dart_financials(code)
     if dart_fin:
         bs      = dart_fin.get("balance_sheet", {})
+        noa     = bs.get("non_operating_assets") or {}
         total_l = bs.get("total_liabilities", 0) or 0
-        cash    = (bs.get("non_operating_assets") or {}).get("현금및현금성자산", 0) or 0
-        net_debt = round(total_l - cash, 1)
+        cash    = noa.get("현금및현금성자산", 0) or 0
+        st_fi   = noa.get("단기금융자산", 0) or 0
+        net_debt = round(total_l - cash - st_fi, 1)
 
     name = entry.get("corp_name", code)
 
