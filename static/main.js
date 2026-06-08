@@ -145,8 +145,7 @@ function initSearch() {
       closeDropdown();           // 즉시 닫기 (세대 번호 증가 → 진행 중 fetch 무효화)
       const q = input.value.trim();
       if (!q) return;
-      const first = dropdown.querySelector('.dropdown-item');
-      if (first) { loadCompany(first.dataset.code); return; }
+      // 항상 현재 입력값으로 새로 검색 — IME 조합 중 드롭다운이 오래된 결과를 보여줄 수 있어 DOM 재사용 금지
       const data = await fetchSearch(q);
       if (data.length) loadCompany(data[0].code);
     } else if (e.key === 'Escape') {
