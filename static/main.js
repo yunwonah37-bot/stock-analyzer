@@ -2275,6 +2275,7 @@ function renderAnalyst(data, info) {
   const curPrice = nv.cur_price || hk.cur_price || info?.current_price || 0;
   const nvTgt    = nv.target_price;
   const hkTgt    = hk.target_price;
+  if (window.stockData) window.stockData.targetPrice = nvTgt || hkTgt || null;
   const nvUpside = nv.upside;
   const hkUpside = hk.upside;
   const opinion  = nv.opinion || hk.opinion || '-';
@@ -3459,6 +3460,23 @@ function renderNPV(data) {
 
   function fmt(n) { return Math.round(n).toLocaleString('ko-KR'); }
 
+  // 목표주가를 달성하는 성장률을 이진탐색으로 역산
+  function solveGrowthRate(tgtPrice, opArr, disc, g, shares, nd) {
+    if (!tgtPrice || tgtPrice <= 0 || shares <= 0) return null;
+    const trial = (gr) => { const r = calcNPV(opArr, gr, disc, g, 0, shares, nd); return r ? r.intrinsic : null; };
+    let lo = -0.5, hi = 3.0;
+    if ((trial(lo) || 0) >= tgtPrice) return lo;
+    if ((trial(hi) || Infinity) <= tgtPrice) return null;
+    for (let i = 0; i < 60; i++) {
+      const mid = (lo + hi) / 2;
+      const v = trial(mid);
+      if (v === null) break;
+      if (v < tgtPrice) lo = mid; else hi = mid;
+      if (hi - lo < 0.00001) break;
+    }
+    return (lo + hi) / 2;
+  }
+
   function verdictInfo(res) {
     if (!res || currentPrice <= 0) return { color: '#888', bg: 'var(--bg-secondary)', label: '—' };
     if (res.intrinsic > currentPrice * 1.1) return { color: '#1D8A4A', bg: '#E8F5E9', label: '저평가' };
@@ -3469,11 +3487,15 @@ function renderNPV(data) {
   function render() {
     const { rawCagr, recentCagr } = getBaseAndCagr(opList);
 
+    const tgtPrice     = window.stockData && window.stockData.targetPrice ? window.stockData.targetPrice : null;
+    const impliedGr    = tgtPrice ? solveGrowthRate(tgtPrice, opList, discount, termGrow, sharesRaw, netDebt) : null;
+    const tgtDesc      = tgtPrice ? `컨센서스 ${fmt(tgtPrice)}원` : '컨센서스 없음';
+
     const scenarios = [
-      { id: 'optimistic',   label: '낙관',    desc: `전체CAGR ${(rawCagr*100).toFixed(1)}%`,            growth: rawCagr        },
-      { id: 'base',         label: '기준',    desc: `CAGR−2%p (${((rawCagr-0.02)*100).toFixed(1)}%)`,  growth: rawCagr - 0.02 },
-      { id: 'recent',       label: '최근3년', desc: `3년CAGR ${(recentCagr*100).toFixed(1)}%`,          growth: recentCagr     },
-      { id: 'conservative', label: '보수',    desc: '무성장 0%',                                         growth: 0              },
+      { id: 'optimistic', label: '낙관',    desc: `전체CAGR ${(rawCagr*100).toFixed(1)}%`,           growth: rawCagr,        },
+      { id: 'base',       label: '기준',    desc: `CAGR−2%p (${((rawCagr-0.02)*100).toFixed(1)}%)`, growth: rawCagr - 0.02, },
+      { id: 'recent',     label: '최근3년', desc: `3년CAGR ${(recentCagr*100).toFixed(1)}%`,         growth: recentCagr,     },
+      { id: 'target',     label: '목표주가', desc: tgtDesc, growth: impliedGr !== null ? impliedGr : 0, tgtPrice, impliedGr },
     ];
 
     const results = scenarios.map(s => ({
@@ -3485,14 +3507,40 @@ function renderNPV(data) {
     const aRes   = active.res;
 
     const scenarioCards = results.map(s => {
+      const isActive = s.id === activeScenario;
+      const border   = `border:2px solid ${isActive ? 'var(--accent)' : 'var(--border)'}`;
+      const bg       = `background:var(--bg${isActive ? '-secondary' : ''})`;
+      const wrap     = `cursor:pointer;border-radius:10px;padding:16px 12px;${bg};${border};transition:border-color .15s`;
+
+      if (s.id === 'target') {
+        if (!s.tgtPrice) {
+          return `<div onclick="npvSelectScenario('target')" style="${wrap}">
+            <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:3px">목표주가</div>
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px">컨센서스 없음</div>
+            <div style="font-size:14px;color:var(--text-muted)">—</div>
+          </div>`;
+        }
+        const gr        = s.impliedGr;
+        const grStr     = gr !== null ? `${(gr*100).toFixed(1)}%` : '—';
+        const realistic = gr !== null && gr <= rawCagr + 0.05  ? { label: '현실적',   color: '#1D8A4A', bg: '#E8F5E9' }
+                        : gr !== null && gr <= rawCagr + 0.15  ? { label: '도전적',   color: '#9B6B00', bg: '#FFF8E1' }
+                        :                                        { label: '비현실적', color: '#C0392B', bg: '#FFEBEE' };
+        return `<div onclick="npvSelectScenario('target')" style="${wrap}">
+          <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:3px">목표주가</div>
+          <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px;line-height:1.4">${s.desc}</div>
+          <div style="font-size:18px;font-weight:700;color:var(--text);margin-bottom:2px">${fmt(s.tgtPrice)}원</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px">역산성장률 ${grStr}</div>
+          <div style="display:inline-block;font-size:11px;padding:2px 8px;border-radius:10px;background:${realistic.bg};color:${realistic.color};font-weight:600">${realistic.label}</div>
+        </div>`;
+      }
+
       const r  = s.res;
       const vi = verdictInfo(r);
-      const isActive    = s.id === activeScenario;
       const priceStr    = r ? `${fmt(Math.round(r.intrinsic))}원` : '계산불가';
       const marginStr   = r ? `${r.margin >= 0 ? '+' : ''}${r.margin.toFixed(1)}%` : '—';
       const marginColor = r && r.margin >= 0 ? '#1D8A4A' : '#C0392B';
       return `
-        <div onclick="npvSelectScenario('${s.id}')" style="cursor:pointer;border-radius:10px;padding:16px 12px;background:var(--bg${isActive?'-secondary':''});border:2px solid ${isActive?'var(--accent)':'var(--border)'};transition:border-color .15s">
+        <div onclick="npvSelectScenario('${s.id}')" style="${wrap}">
           <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:3px">${s.label}</div>
           <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px;line-height:1.4">${s.desc}</div>
           <div style="font-size:18px;font-weight:700;color:var(--text);margin-bottom:4px">${priceStr}</div>
@@ -3520,7 +3568,19 @@ function renderNPV(data) {
           ${scenarioCards}
         </div>
 
-        ${aRes ? `<div style="background:${vi.bg};border-radius:8px;padding:12px 16px;margin-bottom:20px;color:${vi.color};font-weight:600;font-size:13px">
+        ${active.id === 'target' && active.tgtPrice
+          ? (() => {
+              const gr = active.impliedGr;
+              const real = gr !== null && gr <= rawCagr + 0.05  ? { label: '현실적',   color: '#1D8A4A', bg: '#E8F5E9' }
+                         : gr !== null && gr <= rawCagr + 0.15  ? { label: '도전적',   color: '#9B6B00', bg: '#FFF8E1' }
+                         :                                        { label: '비현실적', color: '#C0392B', bg: '#FFEBEE' };
+              const grStr = gr !== null ? `${(gr*100).toFixed(1)}%` : '—';
+              return `<div style="background:${real.bg};border-radius:8px;padding:12px 16px;margin-bottom:20px;color:${real.color};font-weight:600;font-size:13px">
+                목표주가 ${fmt(active.tgtPrice)}원 달성에 필요한 역산 성장률: ${grStr} — ${real.label}
+                <span style="font-weight:400;font-size:12px;margin-left:6px">(과거 CAGR ${(rawCagr*100).toFixed(1)}% 대비)</span>
+              </div>`;
+            })()
+          : aRes ? `<div style="background:${vi.bg};border-radius:8px;padding:12px 16px;margin-bottom:20px;color:${vi.color};font-weight:600;font-size:13px">
           ${active.label} 시나리오: ${vi.label} — 적정가 ${fmt(Math.round(aRes.intrinsic))}원 / 현재가 ${fmt(currentPrice)}원 (${aRes.margin>=0?'+':''}${aRes.margin.toFixed(1)}%)
         </div>` : ''}
 
@@ -3561,7 +3621,7 @@ function renderNPV(data) {
         </div>` : '<div style="color:var(--text-muted);font-size:13px;padding:16px 0">계산 불가 (영업이익 음수 또는 데이터 부족)</div>'}
 
         <div style="font-size:12px;color:var(--text-muted);line-height:1.7;border-top:1px solid var(--border);padding-top:12px">
-          <b>4가지 추정 방식:</b> 낙관(전체CAGR) · 기준(CAGR−2%p) · 최근3년(최근3년CAGR) · 보수(무성장 0%)<br>
+          <b>4가지 추정 방식:</b> 낙관(전체CAGR) · 기준(CAGR−2%p) · 최근3년(최근3년CAGR) · 목표주가(컨센서스 역산성장률)<br>
           <b>계산:</b> 각 성장률로 10년 영업이익 추정 → 할인율 ${discount}%로 PV 환산 → 터미널밸류 합산 → 순부채 차감 → 주식수 나눠 적정주가 산출<br>
           <b>주의:</b> 영업이익 기반 추정치로, 실제 FCF 기반 DCF와 다를 수 있습니다. 참고용으로만 활용하세요.
         </div>
