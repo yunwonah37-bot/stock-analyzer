@@ -3458,7 +3458,7 @@ function renderNPV(data) {
     let cum = 0;
     const tRows = pvs.map((pv, i) => {
       cum += pv;
-      return `<tr><td>+${i+1}년</td><td style="text-align:right">${fmt(Math.round(futProfit[i]/1e8))}억</td><td style="text-align:right">${fmt(Math.round(pv/1e8))}억</td><td style="text-align:right">${fmt(Math.round(cum/1e8))}억</td></tr>`;
+      return `<tr><td>+${i+1}년</td><td style="text-align:right">${fmt(Math.round(futProfit[i]))}억</td><td style="text-align:right">${fmt(Math.round(pv/1e8))}억</td><td style="text-align:right">${fmt(Math.round(cum/1e8))}억</td></tr>`;
     }).join('') + `<tr style="font-weight:600"><td>터미널밸류</td><td style="text-align:right">—</td><td style="text-align:right">${fmt(Math.round(pvTv/1e8))}억</td><td style="text-align:right">${fmt(Math.round((cum+pvTv)/1e8))}억</td></tr>`;
 
     container.innerHTML = `
@@ -3533,7 +3533,7 @@ function renderNPV(data) {
       new Chart(document.getElementById('npvFutChart'), {
         type: 'bar',
         data: { labels: futLabels, datasets: [
-          { label: '추정 영업이익', data: futProfit.map(v => Math.round(v/1e8)), backgroundColor: '#1D9E75', borderWidth: 0 },
+          { label: '추정 영업이익', data: futProfit.map(v => Math.round(v)), backgroundColor: '#1D9E75', borderWidth: 0 },
           { label: '할인 현재가치', data: pvs.map(v => Math.round(v/1e8)), backgroundColor: 'rgba(216,90,48,0.5)', borderWidth: 0 }
         ]},
         options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: true, labels:{font:{size:11},color:tickC,boxWidth:12} } },
