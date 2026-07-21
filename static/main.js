@@ -8,6 +8,8 @@ let execLoaded     = false;
 let exportLoaded   = false;
 let sectorLoaded   = false;
 const charts       = {};
+let _currentFin    = null;   // 마지막 로드된 재무 데이터 (10년 뷰 재렌더용)
+let _annualPeriod  = '3yr';  // 손익계산서 연간 기간 선택 상태
 
 // 경쟁사 직접 추가 상태
 let customCompetitors = [];   // [{code, name}]
@@ -76,6 +78,164 @@ function switchIncomeView(view, btn) {
   const qv = document.getElementById('incomeQuarterlyView');
   if (av) av.style.display = view === 'annual' ? '' : 'none';
   if (qv) qv.style.display = view === 'quarterly' ? '' : 'none';
+}
+
+function switchAnnualPeriod(period, btn) {
+  _annualPeriod = period;
+  ['annualPeriod3yr', 'annualPeriod5yr', 'annualPeriod10yr'].forEach(id => {
+    const b = document.getElementById(id);
+    if (b) b.classList.remove('active');
+  });
+  if (btn) btn.classList.add('active');
+  const v3  = document.getElementById('income3yrView');
+  const v10 = document.getElementById('income10yrView');
+  if (period === '3yr') {
+    if (v3)  v3.style.display  = '';
+    if (v10) v10.style.display = 'none';
+  } else {
+    if (v3)  v3.style.display  = 'none';
+    if (v10) v10.style.display = '';
+    if (_currentFin) render10yrView(_currentFin, period);
+  }
+}
+
+function render10yrView(fin, period) {
+  const h = fin.history_10yr;
+  if (!h) return;
+
+  const n  = period === '5yr' ? 5 : h.years.length;
+  const sl = arr => (arr || []).slice(-n);
+
+  const years = sl(h.years);
+  const rev   = sl(h.revenue);
+  const op    = sl(h.operating_profit);
+  const ni    = sl(h.net_income);
+  const opm   = sl(h.operating_margin);
+  const roe   = sl(h.roe);
+  const dr    = sl(h.debt_ratio);
+
+  // 헤더 텍스트
+  const hdr = document.getElementById('income10yrChartHeader');
+  if (hdr) hdr.innerHTML = `실적 추이 <span class="card-sub">${years[0]}~${years[years.length-1]} · 십억원</span>`;
+  const tblHdr = document.getElementById('income10yrTableHeader');
+  if (tblHdr) tblHdr.textContent = `연도별 실적 요약 (${years[0]}~${years[years.length-1]})`;
+
+  // CAGR 계산
+  const nYrs = years.length - 1;
+  function cagr(vals) {
+    const s = vals[0], e = vals[vals.length - 1];
+    if (!s || s <= 0 || !e || nYrs <= 0) return null;
+    return (Math.pow(e / s, 1 / nYrs) - 1) * 100;
+  }
+
+  // CAGR 배지
+  const cagrBadge = (label, val) => {
+    if (val == null) return '';
+    const up  = val >= 0;
+    const col = up ? 'var(--red)' : 'var(--blue)';
+    return `<span style="background:rgba(47,129,247,0.1);border:1px solid rgba(47,129,247,0.3);
+      border-radius:6px;padding:4px 10px;font-size:12px;font-weight:500;white-space:nowrap">
+      ${label}: <span style="color:${col};font-weight:600">${up ? '▲' : '▼'}${Math.abs(val).toFixed(1)}%</span>
+    </span>`;
+  };
+  const badgesEl = document.getElementById('cagrBadges');
+  if (badgesEl) {
+    const opC = (!op[0] || op[0] <= 0 || !op[op.length-1])
+      ? null
+      : (Math.pow(op[op.length-1] / op[0], 1 / nYrs) - 1) * 100;
+    badgesEl.innerHTML =
+      cagrBadge(`매출 CAGR(${nYrs}년)`,    cagr(rev)) +
+      cagrBadge(`영업이익 CAGR(${nYrs}년)`, opC) +
+      cagrBadge(`순이익 CAGR(${nYrs}년)`,   cagr(ni));
+  }
+
+  // ── 차트 1: 실적 추이 (바) ──────────────────────────────────
+  destroyChart('income10yr');
+  charts.income10yr = new Chart(
+    document.getElementById('income10yrChart').getContext('2d'),
+    {
+      type: 'bar',
+      data: {
+        labels: years,
+        datasets: [
+          { label: '매출액',   data: rev, backgroundColor: '#2f81f740', borderColor: '#2f81f7', borderWidth: 1.5, borderRadius: 3 },
+          { label: '영업이익', data: op,  backgroundColor: '#3fb95040', borderColor: '#3fb950', borderWidth: 1.5, borderRadius: 3 },
+          { label: '순이익',   data: ni,  backgroundColor: '#d2992240', borderColor: '#d29922', borderWidth: 1.5, borderRadius: 3 },
+        ],
+      },
+      options: {
+        ...baseOptions(),
+        scales: {
+          x: { grid: { color: '#e0e4ea' } },
+          y: { grid: { color: '#e0e4ea' }, ticks: { callback: v => fmtOk(v) } },
+        },
+        plugins: {
+          tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${fmtOk(ctx.parsed.y)}` } },
+        },
+      },
+    }
+  );
+
+  // ── 차트 2: 수익성 추이 (꺾은선) ────────────────────────────
+  destroyChart('income10yrRatio');
+  charts.income10yrRatio = new Chart(
+    document.getElementById('income10yrRatioChart').getContext('2d'),
+    {
+      type: 'line',
+      data: {
+        labels: years,
+        datasets: [
+          { label: '영업이익률(%)', data: opm, borderColor: '#3fb950', backgroundColor: '#3fb95018',
+            borderWidth: 2, pointRadius: 4, fill: true, tension: 0.3 },
+          { label: 'ROE(%)',       data: roe, borderColor: '#d29922', backgroundColor: 'transparent',
+            borderWidth: 2, pointRadius: 4, fill: false, tension: 0.3, borderDash: [4,3] },
+        ],
+      },
+      options: {
+        ...baseOptions(),
+        scales: {
+          x: { grid: { color: '#e0e4ea' } },
+          y: { grid: { color: '#e0e4ea' }, ticks: { callback: v => v + '%' } },
+        },
+        plugins: {
+          tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y?.toFixed(1) ?? '-'}%` } },
+        },
+      },
+    }
+  );
+
+  // ── 테이블 ─────────────────────────────────────────────────
+  const maxRev = Math.max(...rev.filter(v => v != null));
+  const maxOp  = Math.max(...op.filter(v => v != null));
+  const maxNi  = Math.max(...ni.filter(v => v != null));
+
+  const rows = [
+    { label: '매출액',     vals: rev, type: 'money', bestVal: maxRev },
+    { label: '영업이익',   vals: op,  type: 'money', bestVal: maxOp  },
+    { label: '영업이익률', vals: opm, type: 'pct'                     },
+    { label: '순이익',     vals: ni,  type: 'money', bestVal: maxNi  },
+    { label: 'ROE',        vals: roe, type: 'pct'                     },
+    { label: '부채비율',   vals: dr,  type: 'pct'                     },
+  ];
+
+  const thead = `<thead><tr><th>항목</th>${years.map(y => `<th>${y}</th>`).join('')}</tr></thead>`;
+  const tbody = rows.map(row => {
+    const cells = row.vals.map((v, i) => {
+      const isBest = row.bestVal != null && v === row.bestVal && v > 0;
+      if (v == null) return `<td>-</td>`;
+      if (row.type === 'pct') {
+        const cls = v < 0 ? ' class="neg"' : '';
+        return `<td${cls}${isBest ? ' style="background:rgba(47,129,247,0.13);font-weight:600"' : ''}>${v.toFixed(1)}%</td>`;
+      }
+      const num = Number(v);
+      const isLoss = num < 0;
+      const bestSt = isBest ? 'background:rgba(47,129,247,0.13);font-weight:600;' : '';
+      return `<td class="${isLoss ? 'neg' : ''}" style="${bestSt}">${fmtOk(num)}</td>`;
+    }).join('');
+    return `<tr><td>${row.label}</td>${cells}</tr>`;
+  }).join('');
+
+  document.getElementById('income10yrTable').innerHTML = thead + '<tbody>' + tbody + '</tbody>';
 }
 
 /* ── 검색 ──────────────────────────────────────────────────── */
@@ -752,10 +912,14 @@ function renderFinancials(fin) {
 }
 
 function renderIncomeStatement(fin) {
+  _currentFin   = fin;
+  _annualPeriod = '3yr';  // 새 기업 로드 시 3년으로 리셋
+
   const is  = fin.income_statement;
   const ttm = fin.ttm  || null;
   const qt  = fin.quarterly_trend || null;
   const lr  = fin.latest_report   || null;
+  const h10 = fin.history_10yr    || null;
 
   // ── 최근 발표 배지 ────────────────────────────────────────
   const badge = document.getElementById('latestReportBadge');
@@ -769,6 +933,19 @@ function renderIncomeStatement(fin) {
   // ── 분기 탭 버튼 표시 여부 ────────────────────────────────
   const qBtn = document.getElementById('incomeViewQuarterly');
   if (qBtn) qBtn.style.display = qt ? '' : 'none';
+
+  // ── 연간 기간 선택기 (10년 데이터 있을 때) ────────────────
+  const periodSel = document.getElementById('annualPeriodSelector');
+  if (periodSel) periodSel.style.display = h10 ? '' : 'none';
+  // 3년 뷰로 리셋
+  const v3  = document.getElementById('income3yrView');
+  const v10 = document.getElementById('income10yrView');
+  if (v3)  v3.style.display  = '';
+  if (v10) v10.style.display = 'none';
+  ['annualPeriod3yr','annualPeriod5yr','annualPeriod10yr'].forEach((id, i) => {
+    const b = document.getElementById(id);
+    if (b) b.classList.toggle('active', i === 0);
+  });
 
   // ── 연간 차트 (incomeChart) ───────────────────────────────
   destroyChart('income');

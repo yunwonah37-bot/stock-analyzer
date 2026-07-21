@@ -268,9 +268,11 @@ canvas { display: block; }
 /* ── 차트 래퍼 ──────────────────────────────────────────────── */
 .chart-wrap         { position: relative; height: 280px; }
 .chart-wrap.h180    { height: 180px; }
+.chart-wrap.h200    { height: 200px; }
 .chart-wrap.h220    { height: 220px; }
 .chart-wrap.h250    { height: 250px; }
 .chart-wrap.h260    { height: 260px; }
+.chart-wrap.h280    { height: 280px; }
 
 /* ── 지표 그리드 ─────────────────────────────────────────────── */
 .ratios-grid {
@@ -1220,6 +1222,7 @@ canvas { display: block; }
   /* 차트 높이 축소 */
   .chart-wrap       { height: 210px; }
   .chart-wrap.h180  { height: 150px; }
+  .chart-wrap.h200  { height: 170px; }
   .chart-wrap.h220  { height: 180px; }
   .chart-wrap.h250  { height: 190px; }
   .chart-wrap.h260  { height: 190px; }

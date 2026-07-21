@@ -1347,6 +1347,99 @@ def _fetch_quarterly_trend(corp_code, fs_div, annual_year,
     return {"labels": labels, "revenue": rev, "operating_profit": op, "net_income": ni}
 
 
+def _extract_3yr_slice(items):
+    """연간보고서 항목 → {year: {rev,op,ni,ta,tl,eq}} 딕셔너리 (억원).
+    thstrm=당기, frmtrm=전기, bfefrmtrm=전전기
+    """
+    if not items:
+        return {}
+    idx = {}
+    for it in items:
+        sj  = it.get("sj_div", "")
+        nm  = (it.get("account_nm") or "").strip()
+        key = (sj, nm)
+        try:
+            ord_ = int(it.get("ord", 9999))
+        except Exception:
+            ord_ = 9999
+        if key not in idx or ord_ < int(idx[key].get("ord", 9999) or 9999):
+            idx[key] = it
+
+    bsns_y = int((items[0] if items else {}).get("bsns_year", 0))
+    if not bsns_y:
+        return {}
+
+    IS_SECTS = ("IS", "CIS")
+
+    def _3(it):
+        if not it:
+            return (0, 0, 0)
+        return (
+            _to_ok(it.get("thstrm_amount",    0)),
+            _to_ok(it.get("frmtrm_amount",    0)),
+            _to_ok(it.get("bfefrmtrm_amount", 0)),
+        )
+
+    rev = _3(_find_acct(idx, IS_SECTS, ["수익(매출액)", "매출액", "영업수익", "매출"]))
+    op  = _3(_find_acct(idx, IS_SECTS, ["영업이익", "영업이익(손실)"]))
+    ni  = _3(_find_acct(idx, IS_SECTS, ["당기순이익", "당기순이익(손실)",
+                                         "지배기업의 소유주에게 귀속되는 당기순이익"]))
+    ta  = _3(_find_acct(idx, "BS", ["자산총계"]))
+    tl  = _3(_find_acct(idx, "BS", ["부채총계"]))
+    eq  = _3(_find_acct(idx, "BS", ["자본총계", "자본합계"]))
+
+    result = {}
+    for i, yr in enumerate([bsns_y, bsns_y - 1, bsns_y - 2]):
+        if yr >= 2010:
+            result[yr] = {
+                "rev": rev[i], "op": op[i], "ni": ni[i],
+                "ta": ta[i], "tl": tl[i], "eq": eq[i],
+            }
+    return result
+
+
+def _fetch_10yr_history(corp_code, fs_div, annual_items, end_year):
+    """end_year 기준 최대 10개년 핵심 손익+BS 지표 조회.
+    annual_items: end_year 사업보고서 항목 (이미 조회된 것 재활용).
+    3개년씩 3번 추가 호출(병렬)로 총 최대 9~10개년 커버.
+    """
+    combined = _extract_3yr_slice(annual_items)  # end_year, end_year-1, end_year-2
+
+    fetch_years = [end_year - 3, end_year - 6, end_year - 9]
+
+    def fetch_year(yr):
+        for fd in (fs_div, "CFS" if fs_div == "OFS" else "OFS"):
+            d = dart_financials_raw(corp_code, yr, fd)
+            if d and d.get("list"):
+                return _extract_3yr_slice(d["list"])
+        return {}
+
+    with ThreadPoolExecutor(max_workers=3) as ex:
+        futures = [ex.submit(fetch_year, yr) for yr in fetch_years]
+    for f in futures:
+        combined.update(f.result())
+
+    start_year   = end_year - 9
+    years_sorted = sorted(y for y in combined if y >= start_year)
+    if not years_sorted:
+        return None
+
+    def _pct(a, b):
+        return round(a / b * 100, 1) if b and b != 0 else None
+
+    return {
+        "years":            [str(y) for y in years_sorted],
+        "revenue":          [combined[y]["rev"] for y in years_sorted],
+        "operating_profit": [combined[y]["op"]  for y in years_sorted],
+        "net_income":       [combined[y]["ni"]  for y in years_sorted],
+        "total_assets":     [combined[y]["ta"]  for y in years_sorted],
+        "equity":           [combined[y]["eq"]  for y in years_sorted],
+        "operating_margin": [_pct(combined[y]["op"], combined[y]["rev"]) for y in years_sorted],
+        "roe":              [_pct(combined[y]["ni"], combined[y]["eq"])  for y in years_sorted],
+        "debt_ratio":       [_pct(combined[y]["tl"], combined[y]["eq"])  for y in years_sorted],
+    }
+
+
 def parse_dart_fin(items):
     """DART 재무항목 리스트 → 우리 응답 포맷 (억원 단위)"""
     idx = {}
@@ -1665,6 +1758,11 @@ def get_dart_financials(stock_code):
         return None
 
     result = parse_dart_fin(annual_items)
+
+    # 10개년 히스토리 (병렬 3호출)
+    hist = _fetch_10yr_history(corp_code, fs_div, annual_items, annual_year)
+    if hist:
+        result["history_10yr"] = hist
 
     # 최신 분기 보고서 탐색
     q_info = _find_and_fetch_latest_quarter(corp_code, fs_div)

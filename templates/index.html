@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>StockLens — 한국 주식 기업분석</title>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/style.css?v=18" />
+  <link rel="stylesheet" href="/static/style.css?v=19" />
   <script src="/static/vendor/chart.umd.min.js?v=2"></script>
 </head>
 <body>
@@ -137,16 +137,45 @@
 
         <!-- 연간 뷰 -->
         <div id="incomeAnnualView">
-          <div class="grid-2">
+          <!-- 기간 선택 (10년 데이터 있을 때만 표시) -->
+          <div id="annualPeriodSelector" style="display:none;margin-bottom:12px">
+            <div class="chart-period-btns" style="display:flex;gap:4px">
+              <button class="period-btn active" id="annualPeriod3yr"  onclick="switchAnnualPeriod('3yr',this)">3년</button>
+              <button class="period-btn"        id="annualPeriod5yr"  onclick="switchAnnualPeriod('5yr',this)">5년</button>
+              <button class="period-btn"        id="annualPeriod10yr" onclick="switchAnnualPeriod('10yr',this)">10년</button>
+            </div>
+          </div>
+
+          <!-- 3년 뷰 (기본) -->
+          <div id="income3yrView">
+            <div class="grid-2">
+              <div class="card">
+                <div class="card-header">매출액 / 영업이익 추이 <span class="card-sub">십억원 · 연간</span></div>
+                <div class="chart-wrap"><canvas id="incomeChart"></canvas></div>
+              </div>
+              <div class="card">
+                <div class="card-header">손익계산서 요약
+                  <span class="card-sub" id="ttmNote" style="display:none;color:#f0883e"></span>
+                </div>
+                <table class="fin-table" id="incomeTable"></table>
+              </div>
+            </div>
+          </div>
+
+          <!-- 5년/10년 뷰 -->
+          <div id="income10yrView" style="display:none">
+            <div id="cagrBadges" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px"></div>
             <div class="card">
-              <div class="card-header">매출액 / 영업이익 추이 <span class="card-sub">십억원 · 연간</span></div>
-              <div class="chart-wrap"><canvas id="incomeChart"></canvas></div>
+              <div class="card-header" id="income10yrChartHeader">실적 추이 <span class="card-sub">십억원</span></div>
+              <div class="chart-wrap h280"><canvas id="income10yrChart"></canvas></div>
             </div>
             <div class="card">
-              <div class="card-header">손익계산서 요약
-                <span class="card-sub" id="ttmNote" style="display:none;color:#f0883e"></span>
-              </div>
-              <table class="fin-table" id="incomeTable"></table>
+              <div class="card-header">수익성 추이 <span class="card-sub">영업이익률 · ROE (%)</span></div>
+              <div class="chart-wrap h200"><canvas id="income10yrRatioChart"></canvas></div>
+            </div>
+            <div class="card">
+              <div class="card-header" id="income10yrTableHeader">연도별 실적 요약</div>
+              <div style="overflow-x:auto"><table class="fin-table" id="income10yrTable"></table></div>
             </div>
           </div>
         </div>
@@ -292,6 +321,6 @@
   </div><!-- /dashboard -->
 </main>
 
-<script src="/static/main.js?v=35"></script>
+<script src="/static/main.js?v=36"></script>
 </body>
 </html>
