@@ -66,6 +66,18 @@ function destroyChart(key) {
   if (charts[key]) { charts[key].destroy(); delete charts[key]; }
 }
 
+function switchIncomeView(view, btn) {
+  ['incomeViewAnnual', 'incomeViewQuarterly'].forEach(id => {
+    const b = document.getElementById(id);
+    if (b) b.classList.remove('active');
+  });
+  if (btn) btn.classList.add('active');
+  const av = document.getElementById('incomeAnnualView');
+  const qv = document.getElementById('incomeQuarterlyView');
+  if (av) av.style.display = view === 'annual' ? '' : 'none';
+  if (qv) qv.style.display = view === 'quarterly' ? '' : 'none';
+}
+
 /* ── 검색 ──────────────────────────────────────────────────── */
 function debounce(fn, ms) {
   let t;
@@ -740,18 +752,36 @@ function renderFinancials(fin) {
 }
 
 function renderIncomeStatement(fin) {
-  // 차트
+  const is  = fin.income_statement;
+  const ttm = fin.ttm  || null;
+  const qt  = fin.quarterly_trend || null;
+  const lr  = fin.latest_report   || null;
+
+  // ── 최근 발표 배지 ────────────────────────────────────────
+  const badge = document.getElementById('latestReportBadge');
+  if (badge && lr) {
+    badge.textContent = `최근 발표: ${lr.label} (${lr.announce} 공시)`;
+    badge.style.display = '';
+  } else if (badge) {
+    badge.style.display = 'none';
+  }
+
+  // ── 분기 탭 버튼 표시 여부 ────────────────────────────────
+  const qBtn = document.getElementById('incomeViewQuarterly');
+  if (qBtn) qBtn.style.display = qt ? '' : 'none';
+
+  // ── 연간 차트 (incomeChart) ───────────────────────────────
   destroyChart('income');
   charts.income = new Chart(
     document.getElementById('incomeChart').getContext('2d'),
     {
       type: 'bar',
       data: {
-        labels: fin.income_statement.years,
+        labels: is.years,
         datasets: [
-          { label: '매출액 (십억원)',   data: fin.income_statement.revenue,          backgroundColor: '#2f81f740', borderColor: '#2f81f7', borderWidth: 1.5, borderRadius: 4 },
-          { label: '영업이익 (십억원)', data: fin.income_statement.operating_profit,  backgroundColor: '#3fb95040', borderColor: '#3fb950', borderWidth: 1.5, borderRadius: 4 },
-          { label: '순이익 (십억원)',   data: fin.income_statement.net_income,        backgroundColor: '#d2992240', borderColor: '#d29922', borderWidth: 1.5, borderRadius: 4 },
+          { label: '매출액',   data: is.revenue,           backgroundColor: '#2f81f740', borderColor: '#2f81f7', borderWidth: 1.5, borderRadius: 4 },
+          { label: '영업이익', data: is.operating_profit,  backgroundColor: '#3fb95040', borderColor: '#3fb950', borderWidth: 1.5, borderRadius: 4 },
+          { label: '순이익',   data: is.net_income,        backgroundColor: '#d2992240', borderColor: '#d29922', borderWidth: 1.5, borderRadius: 4 },
         ],
       },
       options: {
@@ -765,54 +795,139 @@ function renderIncomeStatement(fin) {
     }
   );
 
-  // 테이블
-  const is = fin.income_statement;
+  // ── 연간 테이블 (TTM 열 포함) ─────────────────────────────
+  const hasTTM = !!(ttm && ttm.revenue != null);
+  const ttmNote = document.getElementById('ttmNote');
+  if (ttmNote) {
+    ttmNote.textContent = hasTTM ? `· TTM 포함 (${lr?.label || ''} 기준)` : '';
+    ttmNote.style.display = hasTTM ? '' : 'none';
+  }
 
-  // 영업이익 YoY 계산
-  const opYoy = is.operating_profit.map((v, i) => {
+  function yoy(arr, i) {
     if (i === 0) return '-';
-    const prev = is.operating_profit[i - 1];
-    if (v == null || prev == null || prev === 0) return '-';
-    const pct = ((v - prev) / Math.abs(prev) * 100).toFixed(1);
+    const prev = arr[i - 1];
+    const cur  = arr[i];
+    if (cur == null || prev == null || prev === 0) return '-';
+    const pct = ((cur - prev) / Math.abs(prev) * 100).toFixed(1);
     const up  = pct >= 0;
     return `<span style="color:${up ? 'var(--red)' : 'var(--blue)'}">${up ? '▲' : '▼'}${Math.abs(pct)}%</span>`;
-  });
+  }
 
-  // 매출액 YoY 계산
-  const revYoy = is.revenue.map((v, i) => {
-    if (i === 0) return '-';
-    const prev = is.revenue[i - 1];
-    if (v == null || prev == null || prev === 0) return '-';
-    const pct = ((v - prev) / Math.abs(prev) * 100).toFixed(1);
-    const up  = pct >= 0;
-    return `<span style="color:${up ? 'var(--red)' : 'var(--blue)'}">${up ? '▲' : '▼'}${Math.abs(pct)}%</span>`;
-  });
+  const revYoy = is.revenue.map((_, i) => yoy(is.revenue, i));
+  const opYoy  = is.operating_profit.map((_, i) => yoy(is.operating_profit, i));
 
-  const rows = [
-    { label: '매출액',          vals: is.revenue,           type: 'money' },
-    { label: '매출 증가율',      vals: revYoy,               type: 'html'  },
-    { label: '영업이익',        vals: is.operating_profit,   type: 'money' },
-    { label: '영업이익 증가율',  vals: opYoy,                type: 'html'  },
-    { label: '순이익',          vals: is.net_income,         type: 'money' },
-    { label: '영업이익률',      vals: is.operating_margin.map(v => v != null ? v.toFixed(1) + '%' : '-'), type: 'str' },
-    ...(is.roe        ? [{ label: 'ROE',     vals: is.roe.map(v => v != null ? v.toFixed(1) + '%' : '-'),        type: 'str' }] : []),
-    ...(is.debt_ratio ? [{ label: '부채비율', vals: is.debt_ratio.map(v => v != null ? v.toFixed(1) + '%' : '-'), type: 'str' }] : []),
+  const annualRows = [
+    { label: '매출액',         vals: is.revenue,          ttmV: ttm?.revenue,                                                                  type: 'money' },
+    { label: '매출 YoY',       vals: revYoy,               ttmV: null,                                                                          type: 'html'  },
+    { label: '영업이익',       vals: is.operating_profit, ttmV: ttm?.operating_profit,                                                          type: 'money' },
+    { label: '영업이익 YoY',   vals: opYoy,                ttmV: null,                                                                          type: 'html'  },
+    { label: '순이익',         vals: is.net_income,       ttmV: ttm?.net_income,                                                                type: 'money' },
+    { label: '영업이익률',     vals: is.operating_margin.map(v => v != null ? v.toFixed(1) + '%' : '-'),
+                                                           ttmV: ttm?.operating_margin != null ? ttm.operating_margin.toFixed(1) + '%' : null, type: 'str'   },
+    ...(is.roe        ? [{ label: 'ROE',     vals: is.roe.map(v => v != null ? v.toFixed(1) + '%' : '-'),        ttmV: null, type: 'str' }] : []),
+    ...(is.debt_ratio ? [{ label: '부채비율', vals: is.debt_ratio.map(v => v != null ? v.toFixed(1) + '%' : '-'), ttmV: null, type: 'str' }] : []),
   ];
-  const thead = `<thead><tr><th>항목</th>${is.years.map(y => `<th>${y}</th>`).join('')}</tr></thead>`;
-  const tbody = rows.map(row => {
-    const cells = row.vals.map(v => {
-      if (row.type === 'html')  return `<td>${v}</td>`;
-      if (row.type === 'str')   return `<td>${v}</td>`;
-      const num = Number(v);
-      return `<td class="${num < 0 ? 'neg' : ''}">${fmtOk(num)}</td>`;
-    }).join('');
-    const isYoy = row.label.includes('증가율');
-    return `<tr style="${isYoy ? 'background:rgba(255,255,255,0.02);font-size:12px' : ''}">
-      <td style="${isYoy ? 'color:var(--text-muted);padding-left:18px' : ''}">${row.label}</td>${cells}</tr>`;
-  }).join('');
-  document.getElementById('incomeTable').innerHTML = thead + '<tbody>' + tbody + '</tbody>';
 
-  // 판매관리비 세부 항목 + 비용 구조
+  const ttmTh  = hasTTM ? '<th style="color:#f0883e;font-weight:600">TTM</th>' : '';
+  const aThead = `<thead><tr><th>항목</th>${is.years.map(y => `<th>${y}</th>`).join('')}${ttmTh}</tr></thead>`;
+  const aTbody = annualRows.map(row => {
+    const cells = row.vals.map(v => {
+      if (row.type === 'html') return `<td>${v}</td>`;
+      if (row.type === 'str')  return `<td>${v ?? '-'}</td>`;
+      const n = Number(v);
+      return `<td class="${n < 0 ? 'neg' : ''}">${fmtOk(n)}</td>`;
+    }).join('');
+    let ttmCell = '';
+    if (hasTTM) {
+      const tv = row.ttmV;
+      if (tv == null) {
+        ttmCell = '<td>-</td>';
+      } else if (row.type === 'money') {
+        const n = Number(tv);
+        ttmCell = `<td class="${n < 0 ? 'neg' : ''}" style="color:#f0883e;font-weight:500">${fmtOk(n)}</td>`;
+      } else {
+        ttmCell = `<td style="color:#f0883e;font-weight:500">${tv}</td>`;
+      }
+    }
+    const isYoy = row.label.includes('YoY');
+    return `<tr style="${isYoy ? 'background:rgba(255,255,255,0.02);font-size:12px' : ''}">
+      <td style="${isYoy ? 'color:var(--text-muted);padding-left:18px' : ''}">${row.label}</td>${cells}${ttmCell}</tr>`;
+  }).join('');
+  document.getElementById('incomeTable').innerHTML = aThead + '<tbody>' + aTbody + '</tbody>';
+
+  // ── 분기 차트 + 테이블 ────────────────────────────────────
+  destroyChart('quarterly');
+  if (qt && qt.labels) {
+    // 분기 차트
+    charts.quarterly = new Chart(
+      document.getElementById('quarterlyChart').getContext('2d'),
+      {
+        type: 'bar',
+        data: {
+          labels: qt.labels,
+          datasets: [
+            { label: '매출액',   data: qt.revenue,          backgroundColor: '#2f81f740', borderColor: '#2f81f7', borderWidth: 1.5, borderRadius: 4 },
+            { label: '영업이익', data: qt.operating_profit, backgroundColor: '#3fb95040', borderColor: '#3fb950', borderWidth: 1.5, borderRadius: 4 },
+            { label: '순이익',   data: qt.net_income,       backgroundColor: '#d2992240', borderColor: '#d29922', borderWidth: 1.5, borderRadius: 4 },
+          ],
+        },
+        options: {
+          ...baseOptions(),
+          scales: {
+            x: { grid: { color: '#e0e4ea' } },
+            y: { grid: { color: '#e0e4ea' }, ticks: { callback: v => fmtOk(v) } },
+          },
+          plugins: { tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${fmtOk(ctx.parsed.y)}` } } },
+        },
+      }
+    );
+
+    // 분기 테이블
+    const qRev = qt.revenue;
+    const qOp  = qt.operating_profit;
+    const qNi  = qt.net_income;
+    const qOpm = qRev.map((r, i) =>
+      r && qOp[i] != null ? (qOp[i] / r * 100).toFixed(1) + '%' : '-'
+    );
+    function qoq(arr, i) {
+      if (i === 0 || arr[i] == null || arr[i-1] == null || arr[i-1] === 0) return '-';
+      const pct = ((arr[i] - arr[i-1]) / Math.abs(arr[i-1]) * 100).toFixed(1);
+      const up  = pct >= 0;
+      return `<span style="color:${up ? 'var(--red)' : 'var(--blue)'}">${up ? '▲' : '▼'}${Math.abs(pct)}%</span>`;
+    }
+    const revQoQ = qRev.map((_, i) => qoq(qRev, i));
+
+    // 최신 분기 강조 (마지막 열)
+    const lastIdx = qt.labels.length - 1;
+    const qThead = `<thead><tr><th>항목</th>${qt.labels.map((l, i) =>
+      `<th${i === lastIdx ? ' style="color:#f0883e;font-weight:600"' : ''}>${l}</th>`
+    ).join('')}</tr></thead>`;
+
+    const qRows = [
+      { label: '매출액',    vals: qRev,  type: 'money' },
+      { label: '매출 QoQ', vals: revQoQ, type: 'html'  },
+      { label: '영업이익',  vals: qOp,   type: 'money' },
+      { label: '영업이익률',vals: qOpm,  type: 'str'   },
+      { label: '순이익',    vals: qNi,   type: 'money' },
+    ];
+    const qTbody = qRows.map(row => {
+      const cells = row.vals.map((v, i) => {
+        const isLast = i === lastIdx;
+        const style  = isLast ? ' style="color:#f0883e;font-weight:500"' : '';
+        if (row.type === 'html')  return `<td${style}>${v}</td>`;
+        if (row.type === 'str')   return `<td${style}>${v ?? '-'}</td>`;
+        if (v == null) return `<td>-</td>`;
+        const n = Number(v);
+        return `<td class="${n < 0 ? 'neg' : ''}"${style}>${fmtOk(n)}</td>`;
+      }).join('');
+      const isQoQ = row.label.includes('QoQ');
+      return `<tr style="${isQoQ ? 'background:rgba(255,255,255,0.02);font-size:12px' : ''}">
+        <td style="${isQoQ ? 'color:var(--text-muted);padding-left:18px' : ''}">${row.label}</td>${cells}</tr>`;
+    }).join('');
+    document.getElementById('quarterlyTable').innerHTML = qThead + '<tbody>' + qTbody + '</tbody>';
+  }
+
+  // ── 판매관리비 세부 항목 + 비용 구조 ─────────────────────
   const sgaEl = document.getElementById('sgaBreakdown');
   if (!sgaEl) return;
 
@@ -824,93 +939,70 @@ function renderIncomeStatement(fin) {
   const opProfit = is.operating_profit[is.operating_profit.length - 1] || 0;
   const rndAmt   = fin.rnd?.expense?.[fin.rnd.expense.length - 1] || 0;
 
-  // SGA 세부 항목: DART에서 의미있는 항목이 있으면 사용, 아니면 R&D + 기타로 구성
-  const OTHER_THRESHOLD = 0.92; // 기타가 92% 이상이면 의미없는 세부항목
+  const OTHER_THRESHOLD = 0.92;
   const hasRealSubs = sgaSubs.length > 0 &&
-    (sgaSubs.find(s => s.name !== '기타')?.amount || 0) /
-    (sga || 1) > (1 - OTHER_THRESHOLD);
+    (sgaSubs.find(s => s.name !== '기타')?.amount || 0) / (sga || 1) > (1 - OTHER_THRESHOLD);
 
   let displaySubs = [];
   if (hasRealSubs) {
-    // DART에서 실제 세부 항목 추출됨
     displaySubs = sgaSubs;
-  } else {
-    // R&D + 기타판관비 구성
-    if (rndAmt > 0 && sga > 0) {
-      displaySubs = [
-        { name: '연구개발비', amount: rndAmt },
-        { name: '기타 판관비', amount: Math.max(0, sga - rndAmt) },
-      ];
-    }
+  } else if (rndAmt > 0 && sga > 0) {
+    displaySubs = [
+      { name: '연구개발비',  amount: rndAmt },
+      { name: '기타 판관비', amount: Math.max(0, sga - rndAmt) },
+    ];
   }
 
   const COLORS = ['#2f81f7','#3fb950','#d29922','#f85149','#58a6ff',
-                  '#56d364','#e3b341','#ff7b72','#79c0ff','#85e89d',
-                  '#ffa657','#aaa'];
+                  '#56d364','#e3b341','#ff7b72','#79c0ff','#85e89d','#ffa657','#aaa'];
 
   function sgaBarRows(items, total) {
     if (!items.length) return '';
     const maxAmt = Math.max(...items.map(s => s.amount));
-    const rows = items.map((s, i) => {
+    const r = items.map((s, i) => {
       const pct    = total > 0 ? (s.amount / total * 100).toFixed(1) : 0;
       const barPct = maxAmt > 0 ? (s.amount / maxAmt * 100).toFixed(1) : 0;
       return `<div class="sga-row">
         <div class="sga-name">${s.name}</div>
-        <div class="sga-bar-wrap">
-          <div class="sga-bar-fill" style="width:${barPct}%;background:${COLORS[i % COLORS.length]}99"></div>
-        </div>
+        <div class="sga-bar-wrap"><div class="sga-bar-fill" style="width:${barPct}%;background:${COLORS[i % COLORS.length]}99"></div></div>
         <div class="sga-pct">${pct}%</div>
         <div class="sga-amt">${fmtOk(s.amount)}</div>
       </div>`;
     }).join('');
-    const totalRow = `<div class="sga-row sga-total-row">
-      <div class="sga-name">판관비 합계</div>
-      <div class="sga-bar-wrap"></div>
-      <div class="sga-pct">100%</div>
-      <div class="sga-amt">${fmtOk(total)}</div>
+    return r + `<div class="sga-row sga-total-row">
+      <div class="sga-name">판관비 합계</div><div class="sga-bar-wrap"></div>
+      <div class="sga-pct">100%</div><div class="sga-amt">${fmtOk(total)}</div>
     </div>`;
-    return rows + totalRow;
   }
 
-  // 비용 구조 (매출원가 + 판관비 + 영업이익 = 매출액 기준)
   let costHtml = '';
   if (revenue > 0 && (cogs > 0 || sga > 0)) {
     const costItems = [];
-    if (cogs     > 0) costItems.push({ name: '매출원가',    amount: cogs,                color: '#2f81f7' });
-    if (rndAmt   > 0) costItems.push({ name: '연구개발비',   amount: rndAmt,             color: '#d29922' });
-    const sgaRest = sga > 0 ? Math.max(0, sga - rndAmt) : 0;
-    if (sgaRest  > 0) costItems.push({ name: '기타 판관비', amount: sgaRest,             color: '#58a6ff' });
-    if (opProfit > 0) costItems.push({ name: '영업이익',    amount: opProfit,            color: '#3fb950' });
-    if (opProfit < 0) costItems.push({ name: '영업손실',    amount: Math.abs(opProfit),  color: '#f85149' });
-
+    if (cogs     > 0) costItems.push({ name: '매출원가',   amount: cogs,               color: '#2f81f7' });
+    if (rndAmt   > 0) costItems.push({ name: '연구개발비', amount: rndAmt,             color: '#d29922' });
+    const sgaRest = Math.max(0, sga - rndAmt);
+    if (sgaRest  > 0) costItems.push({ name: '기타 판관비',amount: sgaRest,            color: '#58a6ff' });
+    if (opProfit > 0) costItems.push({ name: '영업이익',   amount: opProfit,           color: '#3fb950' });
+    if (opProfit < 0) costItems.push({ name: '영업손실',   amount: Math.abs(opProfit), color: '#f85149' });
     const costRows = costItems.map(item => {
-      const pct    = (item.amount / revenue * 100).toFixed(1);
-      const barPct = (item.amount / revenue * 100).toFixed(1);
+      const pct = (item.amount / revenue * 100).toFixed(1);
       return `<div class="sga-row">
         <div class="sga-name">${item.name}</div>
-        <div class="sga-bar-wrap">
-          <div class="sga-bar-fill" style="width:${barPct}%;background:${item.color}99"></div>
-        </div>
-        <div class="sga-pct">${pct}%</div>
-        <div class="sga-amt">${fmtOk(item.amount)}</div>
+        <div class="sga-bar-wrap"><div class="sga-bar-fill" style="width:${pct}%;background:${item.color}99"></div></div>
+        <div class="sga-pct">${pct}%</div><div class="sga-amt">${fmtOk(item.amount)}</div>
       </div>`;
     }).join('');
-
     costHtml = `<div class="card">
       <div class="card-header">📊 비용 구조 분석 <span class="card-sub">${sgaYear}년 · 매출액 대비 비율</span></div>
-      <div class="sga-list">
-        ${costRows}
+      <div class="sga-list">${costRows}
         <div class="sga-row sga-total-row">
-          <div class="sga-name">매출액</div>
-          <div class="sga-bar-wrap"></div>
-          <div class="sga-pct">100%</div>
-          <div class="sga-amt">${fmtOk(revenue)}</div>
+          <div class="sga-name">매출액</div><div class="sga-bar-wrap"></div>
+          <div class="sga-pct">100%</div><div class="sga-amt">${fmtOk(revenue)}</div>
         </div>
       </div>
     </div>`;
   }
 
-  // 판관비 세부 항목 카드
   const srcNote = hasRealSubs
     ? `DART 공시 세부항목 · ${sgaYear}년 · 십억원`
     : (rndAmt > 0 ? `연구개발비 별도 산출 · ${sgaYear}년 · 십억원` : `${sgaYear}년 · 십억원`);
@@ -921,8 +1013,7 @@ function renderIncomeStatement(fin) {
       ? `<div class="sga-list">${sgaBarRows(displaySubs, sga)}</div>`
       : `<div style="padding:16px 0 4px;color:var(--text-muted);font-size:13px">
            DART 세부 항목 미공시 — 판매비와관리비 합계(${fmtOk(sga)})만 공시된 기업입니다.
-         </div>`
-    }
+         </div>`}
   </div>` : '';
 
   sgaEl.innerHTML = costHtml + subHtml;

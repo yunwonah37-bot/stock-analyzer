@@ -1154,11 +1154,197 @@ def dart_company_info(corp_code):
     return _dart_get("company.json", {"corp_code": corp_code})
 
 
-def dart_financials_raw(corp_code, year, fs_div):
+def dart_financials_raw(corp_code, year, fs_div, reprt_code="11011"):
     return _dart_get("fnlttSinglAcntAll.json", {
         "corp_code": corp_code, "bsns_year": str(year),
-        "reprt_code": "11011", "fs_div": fs_div,
+        "reprt_code": reprt_code, "fs_div": fs_div,
     })
+
+
+# 분기 보고서 코드별 공시 시작 월, 이름
+_REPRT_SCHEDULE = [
+    (11, "11014", "3분기"),
+    (8,  "11012", "반기"),
+    (5,  "11013", "1분기"),
+]
+
+
+def _reprt_announce_month(reprt_code, year):
+    month = {"11013": 5, "11012": 8, "11014": 11, "11011": 3}.get(reprt_code, 3)
+    return f"{year}.{month:02d}"
+
+
+def _reprt_label(reprt_code, year):
+    name = {"11013": "1분기", "11012": "반기", "11014": "3분기", "11011": "사업보고서"}.get(reprt_code, "")
+    return f"{year}년 {name}"
+
+
+def _extract_quarter_metrics(items):
+    """분기보고서 항목 → 주요 손익 지표.
+    반환: {rev_cur, rev_prev, op_cur, op_prev, ni_cur, ni_prev} (억원)
+    cur=당 분기 누적, prev=전년 동기 누적
+    """
+    if not items:
+        return None
+    idx = {}
+    for it in items:
+        sj  = it.get("sj_div", "")
+        nm  = (it.get("account_nm") or "").strip()
+        key = (sj, nm)
+        try:
+            ord_ = int(it.get("ord", 9999))
+        except Exception:
+            ord_ = 9999
+        if key not in idx or ord_ < int(idx[key].get("ord", 9999) or 9999):
+            idx[key] = it
+    IS_SECTS = ("IS", "CIS")
+
+    def _pair(it):
+        if not it:
+            return 0, 0
+        # 분기보고서 누적 금액:
+        # thstrm_add_amount = 당기 누적 (H1→상반기, Q3→9M), thstrm_amount = 개별 분기
+        # frmtrm_add_amount = 전년 동기 누적, frmtrm_q_amount = 전년 동기 개별
+        cur_raw  = it.get("thstrm_add_amount")  or it.get("thstrm_amount")  or 0
+        prev_raw = it.get("frmtrm_add_amount") or it.get("frmtrm_q_amount") or it.get("frmtrm_amount") or 0
+        return (_to_ok(cur_raw), _to_ok(prev_raw))
+
+    rev_cur, rev_prev = _pair(_find_acct(idx, IS_SECTS, ["수익(매출액)", "매출액", "영업수익", "매출"]))
+    op_cur,  op_prev  = _pair(_find_acct(idx, IS_SECTS, ["영업이익", "영업이익(손실)"]))
+    ni_cur,  ni_prev  = _pair(_find_acct(idx, IS_SECTS, [
+        "당기순이익", "당기순이익(손실)",
+        "분기순이익", "분기순이익(손실)",
+        "반기순이익", "반기순이익(손실)",
+        "지배기업의 소유주에게 귀속되는 당기순이익",
+    ]))
+    if rev_cur == 0 and op_cur == 0:
+        return None
+    return {
+        "rev_cur": rev_cur, "rev_prev": rev_prev,
+        "op_cur":  op_cur,  "op_prev":  op_prev,
+        "ni_cur":  ni_cur,  "ni_prev":  ni_prev,
+    }
+
+
+def _find_and_fetch_latest_quarter(corp_code, preferred_fs_div="CFS"):
+    """현재 날짜 기준 가장 최신 분기·반기 보고서를 탐색·조회.
+    Returns: (reprt_code, year, label, items, fs_div) or None
+    """
+    cur_month = datetime.now().month
+    cur_year  = datetime.now().year
+
+    candidates = []
+    for min_month, reprt_code, qname in _REPRT_SCHEDULE:
+        if cur_month >= min_month:
+            candidates.append((cur_year, reprt_code, f"{cur_year}년 {qname}"))
+    for _, reprt_code, qname in _REPRT_SCHEDULE:
+        candidates.append((cur_year - 1, reprt_code, f"{cur_year - 1}년 {qname}"))
+
+    for year, reprt_code, label in candidates:
+        for fs_div in (preferred_fs_div, "CFS" if preferred_fs_div == "OFS" else "OFS"):
+            data = _dart_get("fnlttSinglAcntAll.json", {
+                "corp_code": corp_code, "bsns_year": str(year),
+                "reprt_code": reprt_code, "fs_div": fs_div,
+            })
+            if data and data.get("list"):
+                return reprt_code, year, label, data["list"], fs_div
+    return None
+
+
+def _fetch_quarterly_trend(corp_code, fs_div, annual_year,
+                            ann_rev, ann_op, ann_ni,
+                            latest_reprt_code, latest_year, qm_latest):
+    """최근 5개 분기 개별 실적 계산.
+    - annual_year: 연간 보고서 연도 (e.g. 2025)
+    - latest_year: 최신 분기 보고서 연도 (e.g. 2026, > annual_year)
+    - qm_latest: 최신 분기 누적 지표 (thstrm=cur, frmtrm=prev)
+    """
+    def fetch_q(reprt_code, year):
+        for fd in (fs_div, "CFS" if fs_div == "OFS" else "OFS"):
+            d = _dart_get("fnlttSinglAcntAll.json", {
+                "corp_code": corp_code, "bsns_year": str(year),
+                "reprt_code": reprt_code, "fs_div": fd,
+            })
+            if d and d.get("list"):
+                return _extract_quarter_metrics(d["list"])
+        return None
+
+    def s(a, b):
+        if a is None or b is None:
+            return None
+        return a - b
+
+    if latest_reprt_code == "11013":  # Q1 최신
+        # frmtrm = Q1 of annual_year, 추가 필요: H1·Q3 of annual_year
+        with ThreadPoolExecutor(max_workers=2) as ex:
+            f_h1 = ex.submit(fetch_q, "11012", annual_year)
+            f_q3 = ex.submit(fetch_q, "11014", annual_year)
+        qm_h1 = f_h1.result()
+        qm_q3 = f_q3.result()
+        py_q1 = {"rev": qm_latest["rev_prev"], "op": qm_latest["op_prev"], "ni": qm_latest["ni_prev"]}
+        h1r = qm_h1["rev_cur"] if qm_h1 else None
+        h1o = qm_h1["op_cur"]  if qm_h1 else None
+        h1n = qm_h1["ni_cur"]  if qm_h1 else None
+        q3r = qm_q3["rev_cur"] if qm_q3 else None
+        q3o = qm_q3["op_cur"]  if qm_q3 else None
+        q3n = qm_q3["ni_cur"]  if qm_q3 else None
+        labels = [f"{annual_year}Q1", f"{annual_year}Q2", f"{annual_year}Q3", f"{annual_year}Q4", f"{latest_year}Q1"]
+        rev = [py_q1["rev"], s(h1r, py_q1["rev"]), s(q3r, h1r), s(ann_rev, q3r), qm_latest["rev_cur"]]
+        op  = [py_q1["op"],  s(h1o, py_q1["op"]),  s(q3o, h1o), s(ann_op,  q3o), qm_latest["op_cur"]]
+        ni  = [py_q1["ni"],  s(h1n, py_q1["ni"]),  s(q3n, h1n), s(ann_ni,  q3n), qm_latest["ni_cur"]]
+
+    elif latest_reprt_code == "11012":  # 반기 최신
+        # frmtrm = H1 of annual_year, 추가: Q1·Q3 of annual_year, Q1 of latest_year
+        with ThreadPoolExecutor(max_workers=3) as ex:
+            f_q1_py = ex.submit(fetch_q, "11013", annual_year)
+            f_q3_py = ex.submit(fetch_q, "11014", annual_year)
+            f_q1_cy = ex.submit(fetch_q, "11013", latest_year)
+        qm_q1_py = f_q1_py.result()
+        qm_q3_py = f_q3_py.result()
+        qm_q1_cy = f_q1_cy.result()
+        h1r_py = qm_latest["rev_prev"]; h1o_py = qm_latest["op_prev"]; h1n_py = qm_latest["ni_prev"]
+        q1r_py = qm_q1_py["rev_cur"] if qm_q1_py else None
+        q3r_py = qm_q3_py["rev_cur"] if qm_q3_py else None
+        q1r_cy = qm_q1_cy["rev_cur"] if qm_q1_cy else None
+        q1o_py = qm_q1_py["op_cur"]  if qm_q1_py else None
+        q3o_py = qm_q3_py["op_cur"]  if qm_q3_py else None
+        q1o_cy = qm_q1_cy["op_cur"]  if qm_q1_cy else None
+        q1n_py = qm_q1_py["ni_cur"]  if qm_q1_py else None
+        q3n_py = qm_q3_py["ni_cur"]  if qm_q3_py else None
+        q1n_cy = qm_q1_cy["ni_cur"]  if qm_q1_cy else None
+        labels = [f"{annual_year}Q2", f"{annual_year}Q3", f"{annual_year}Q4", f"{latest_year}Q1", f"{latest_year}Q2"]
+        rev = [s(h1r_py, q1r_py), s(q3r_py, h1r_py), s(ann_rev, q3r_py), q1r_cy, s(qm_latest["rev_cur"], q1r_cy)]
+        op  = [s(h1o_py, q1o_py), s(q3o_py, h1o_py), s(ann_op,  q3o_py), q1o_cy, s(qm_latest["op_cur"],  q1o_cy)]
+        ni  = [s(h1n_py, q1n_py), s(q3n_py, h1n_py), s(ann_ni,  q3n_py), q1n_cy, s(qm_latest["ni_cur"],  q1n_cy)]
+
+    elif latest_reprt_code == "11014":  # Q3(9M) 최신
+        # frmtrm = 9M of annual_year, 추가: H1 of annual_year, Q1·H1 of latest_year
+        with ThreadPoolExecutor(max_workers=3) as ex:
+            f_h1_py = ex.submit(fetch_q, "11012", annual_year)
+            f_q1_cy = ex.submit(fetch_q, "11013", latest_year)
+            f_h1_cy = ex.submit(fetch_q, "11012", latest_year)
+        qm_h1_py = f_h1_py.result()
+        qm_q1_cy = f_q1_cy.result()
+        qm_h1_cy = f_h1_cy.result()
+        q3r_py = qm_latest["rev_prev"]; q3o_py = qm_latest["op_prev"]; q3n_py = qm_latest["ni_prev"]
+        h1r_py = qm_h1_py["rev_cur"] if qm_h1_py else None
+        q1r_cy = qm_q1_cy["rev_cur"] if qm_q1_cy else None
+        h1r_cy = qm_h1_cy["rev_cur"] if qm_h1_cy else None
+        h1o_py = qm_h1_py["op_cur"]  if qm_h1_py else None
+        q1o_cy = qm_q1_cy["op_cur"]  if qm_q1_cy else None
+        h1o_cy = qm_h1_cy["op_cur"]  if qm_h1_cy else None
+        h1n_py = qm_h1_py["ni_cur"]  if qm_h1_py else None
+        q1n_cy = qm_q1_cy["ni_cur"]  if qm_q1_cy else None
+        h1n_cy = qm_h1_cy["ni_cur"]  if qm_h1_cy else None
+        labels = [f"{annual_year}Q3", f"{annual_year}Q4", f"{latest_year}Q1", f"{latest_year}Q2", f"{latest_year}Q3"]
+        rev = [s(q3r_py, h1r_py), s(ann_rev, q3r_py), q1r_cy, s(h1r_cy, q1r_cy), s(qm_latest["rev_cur"], h1r_cy)]
+        op  = [s(q3o_py, h1o_py), s(ann_op,  q3o_py), q1o_cy, s(h1o_cy, q1o_cy), s(qm_latest["op_cur"],  h1o_cy)]
+        ni  = [s(q3n_py, h1n_py), s(ann_ni,  q3n_py), q1n_cy, s(h1n_cy, q1n_cy), s(qm_latest["ni_cur"],  h1n_cy)]
+
+    else:
+        return None
+
+    return {"labels": labels, "revenue": rev, "operating_profit": op, "net_income": ni}
 
 
 def parse_dart_fin(items):
@@ -1457,19 +1643,73 @@ def parse_dart_fin(items):
 
 
 def get_dart_financials(stock_code):
-    """종목코드로 DART 재무제표 조회. 연결 → 별도 순으로 시도."""
+    """종목코드로 DART 재무제표 조회. TTM 및 분기 추이 포함."""
     _corps_ready.wait(timeout=10)
     entry = _corp_by_code.get(stock_code)
     if not entry:
         return None
-    corp_code = entry["corp_code"]
-    year = datetime.now().year - 1   # 직전 사업연도
-    for fs_div in ("CFS", "OFS"):
-        data = dart_financials_raw(corp_code, year, fs_div)
+    corp_code  = entry["corp_code"]
+    annual_year = datetime.now().year - 1  # 직전 사업연도
+
+    # 연간(사업보고서) 조회
+    annual_items = None
+    fs_div = None
+    for fd in ("CFS", "OFS"):
+        data = dart_financials_raw(corp_code, annual_year, fd)
         if data and data.get("list"):
-            app.logger.info(f"DART 재무({fs_div}) {stock_code}/{year}: {len(data['list'])}개 항목")
-            return parse_dart_fin(data["list"])
-    return None
+            annual_items = data["list"]
+            fs_div = fd
+            app.logger.info(f"DART 재무({fd}) {stock_code}/{annual_year}: {len(annual_items)}개 항목")
+            break
+    if not annual_items:
+        return None
+
+    result = parse_dart_fin(annual_items)
+
+    # 최신 분기 보고서 탐색
+    q_info = _find_and_fetch_latest_quarter(corp_code, fs_div)
+
+    if q_info:
+        reprt_code, q_year, q_label, q_items, q_fs_div = q_info
+        qm = _extract_quarter_metrics(q_items)
+        # TTM·분기추이는 분기 데이터가 연간보다 최신일 때만 유의미
+        if qm and q_year > annual_year and qm["rev_cur"] > 0:
+            is_ = result["income_statement"]
+            ann_rev = is_["revenue"][-1]
+            ann_op  = is_["operating_profit"][-1]
+            ann_ni  = is_["net_income"][-1]
+            ttm_rev = ann_rev + (qm["rev_cur"] - qm["rev_prev"])
+            ttm_op  = ann_op  + (qm["op_cur"]  - qm["op_prev"])
+            ttm_ni  = ann_ni  + (qm["ni_cur"]  - qm["ni_prev"])
+            result["ttm"] = {
+                "revenue":          ttm_rev,
+                "operating_profit": ttm_op,
+                "net_income":       ttm_ni,
+                "operating_margin": round(ttm_op / ttm_rev * 100, 1) if ttm_rev and ttm_rev > 0 else None,
+            }
+            trend = _fetch_quarterly_trend(
+                corp_code, q_fs_div, annual_year,
+                ann_rev, ann_op, ann_ni,
+                reprt_code, q_year, qm
+            )
+            if trend:
+                result["quarterly_trend"] = trend
+
+        result["latest_report"] = {
+            "label":      q_label,
+            "reprt_code": reprt_code,
+            "year":       q_year,
+            "announce":   _reprt_announce_month(reprt_code, q_year),
+        }
+    else:
+        result["latest_report"] = {
+            "label":      f"{annual_year}년 사업보고서",
+            "reprt_code": "11011",
+            "year":       annual_year,
+            "announce":   _reprt_announce_month("11011", annual_year),
+        }
+
+    return result
 
 
 _CORP_SUFFIX = re.compile(

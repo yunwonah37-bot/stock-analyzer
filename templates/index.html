@@ -120,16 +120,51 @@
 
       <!-- 손익계산서 -->
       <div id="subtab-income" class="subtab-pane">
-        <div class="grid-2">
-          <div class="card">
-            <div class="card-header">매출액 / 영업이익 추이 <span class="card-sub">십억원</span></div>
-            <div class="chart-wrap"><canvas id="incomeChart"></canvas></div>
+
+        <!-- 기간 토글 + 최근 발표 배지 -->
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+          <div class="chart-period-btns" style="display:flex;gap:4px">
+            <button class="period-btn active" id="incomeViewAnnual"
+                    onclick="switchIncomeView('annual',this)">연간</button>
+            <button class="period-btn" id="incomeViewQuarterly"
+                    onclick="switchIncomeView('quarterly',this)"
+                    style="display:none">분기</button>
           </div>
-          <div class="card">
-            <div class="card-header">손익계산서 요약</div>
-            <table class="fin-table" id="incomeTable"></table>
+          <span id="latestReportBadge" class="src-badge"
+                style="display:none;background:rgba(240,136,62,0.13);color:#f0883e;
+                       border:1px solid rgba(240,136,62,0.35);font-size:11px;font-weight:500"></span>
+        </div>
+
+        <!-- 연간 뷰 -->
+        <div id="incomeAnnualView">
+          <div class="grid-2">
+            <div class="card">
+              <div class="card-header">매출액 / 영업이익 추이 <span class="card-sub">십억원 · 연간</span></div>
+              <div class="chart-wrap"><canvas id="incomeChart"></canvas></div>
+            </div>
+            <div class="card">
+              <div class="card-header">손익계산서 요약
+                <span class="card-sub" id="ttmNote" style="display:none;color:#f0883e"></span>
+              </div>
+              <table class="fin-table" id="incomeTable"></table>
+            </div>
           </div>
         </div>
+
+        <!-- 분기 뷰 -->
+        <div id="incomeQuarterlyView" style="display:none">
+          <div class="grid-2">
+            <div class="card">
+              <div class="card-header">분기별 실적 추이 <span class="card-sub">십억원 · 개별 분기</span></div>
+              <div class="chart-wrap"><canvas id="quarterlyChart"></canvas></div>
+            </div>
+            <div class="card">
+              <div class="card-header">분기별 손익 요약</div>
+              <table class="fin-table" id="quarterlyTable"></table>
+            </div>
+          </div>
+        </div>
+
         <div id="sgaBreakdown"></div>
       </div>
 
@@ -257,6 +292,6 @@
   </div><!-- /dashboard -->
 </main>
 
-<script src="/static/main.js?v=34"></script>
+<script src="/static/main.js?v=35"></script>
 </body>
 </html>
